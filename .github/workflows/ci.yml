@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      # Unit + integration tests. Integration tests start a real Postgres via
+      # embedded-postgres (downloaded binary) so RLS isolation is genuinely
+      # exercised — no Docker service needed.
+      - name: Test
+        run: npm test
+        env:
+          NODE_ENV: test
+          PARTNEROS_LOCAL_DEV: "true"
+
+      - name: Build
+        run: npm run build
+        env:
+          # Build-time env only; format-valid placeholders. `next build` runs in
+          # its build phase, so it does NOT require real runtime secrets and does
+          # NOT honor PARTNEROS_LOCAL_DEV (see src/env.ts).
+          DATABASE_URL: postgres://u:p@localhost:5432/db
+          OIDC_ISSUER: http://localhost:4444
+          OIDC_CLIENT_ID: partneros-local
+          OIDC_CLIENT_SECRET: local-stub-secret
+          OIDC_REDIRECT_URI: http://localhost:3000/api/auth/callback
+          SESSION_JWT_SECRET: ci-only-secret-at-least-32-bytes-long-xx
+          S3_ENDPOINT: http://localhost:9000
+          S3_BUCKET: partneros-evidence
+          S3_ACCESS_KEY_ID: local-stub
+          S3_SECRET_ACCESS_KEY: local-stub-secret
+          MALWARE_SCAN_WEBHOOK_SECRET: ci-scan-hmac-secret

@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "partneros-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "obp",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\Luis\\only-best-practices", "run", "dev"],
+      "port": 3001,
+      "autoPort": false
+    }
+  ]
+}

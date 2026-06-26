@@ -1,0 +1,32 @@
+# dependencies
+/node_modules
+
+# next
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+/dist
+
+# test artifacts
+/coverage
+/playwright-report
+/test-results
+
+# embedded postgres data dir (real PG binary state)
+/.pgdata
+
+# local stub state
+/.stub-storage
+
+# env
+.env
+.env.local
+.env*.local
+
+# misc
+*.tsbuildinfo
+.DS_Store
+*.log

@@ -1,0 +1,60 @@
+{
+  "name": "partneros",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "stub:all": "tsx scripts/stubs/run-all.ts",
+    "dev:db": "tsx scripts/dev-db.ts",
+    "dev:oidc": "tsx scripts/stubs/oidc-stub.ts",
+    "dev:seed": "tsx scripts/dev-seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@aws-sdk/client-partnercentral-selling": "^3.1075.0",
+    "@aws-sdk/client-s3": "^3.620.0",
+    "@aws-sdk/client-sts": "^3.1075.0",
+    "@aws-sdk/s3-request-presigner": "^3.620.0",
+    "@node-saml/node-saml": "^5.1.0",
+    "@upstash/ratelimit": "^2.0.3",
+    "@upstash/redis": "^1.34.0",
+    "drizzle-orm": "^0.36.0",
+    "exceljs": "^4.4.0",
+    "jose": "^5.9.0",
+    "next": "^15.0.0",
+    "postgres": "^3.4.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^22.5.0",
+    "@types/node-forge": "^1.3.14",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "drizzle-kit": "^0.28.0",
+    "embedded-postgres": "18.4.0-beta.17",
+    "eslint": "^9.12.0",
+    "eslint-config-next": "^15.0.0",
+    "node-forge": "^1.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
