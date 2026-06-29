@@ -3,7 +3,7 @@ import { deadlineRisk } from "@/domain/mdf/analytics";
 import { isAtRisk, isHighValue } from "@/domain/ace/opportunities";
 import { computeRepHealth } from "@/domain/ace/rep-intelligence";
 import { isExpiringSoon } from "@/domain/evidence/inventory";
-import { isMilestoneOverdue } from "@/domain/roadmaps/progress";
+import { isMilestoneOverdue, isMilestoneUpcoming } from "@/domain/roadmaps/progress";
 import { renewalReadiness, RENEWAL_BAND_LABELS } from "@/domain/solutions/renewal";
 import type { TierId } from "@/domain/tiers/catalog";
 import type { CommandInputs } from "@/domain/command/types";
@@ -65,7 +65,7 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
         detail: `Task due ${t.dueDate}.`,
         ownerUserId: t.ownerUserId,
         dueDate: t.dueDate,
-        link: "/tasks",
+        link: "/command/tasks",
       });
     } else if (t.status === "blocked") {
       out.push({
@@ -76,7 +76,7 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
         detail: "Task is blocked and needs intervention.",
         ownerUserId: t.ownerUserId,
         dueDate: t.dueDate,
-        link: "/tasks",
+        link: "/command/tasks",
       });
     }
   }
@@ -149,7 +149,8 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
     }
   }
 
-  // Overdue milestones on finalized roadmaps — committed plans that are slipping.
+  // Milestones on finalized roadmaps (committed plans): flag overdue ones, and warn
+  // on the ones coming due within the look-ahead window before they slip.
   for (const m of inputs.milestones) {
     if (isMilestoneOverdue(m, today)) {
       out.push({
@@ -160,7 +161,18 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
         detail: `Target ${m.targetDate} has passed.`,
         ownerUserId: m.ownerUserId,
         dueDate: m.targetDate,
-        link: `/roadmaps/${m.roadmapId}`,
+        link: `/plan/roadmaps/${m.roadmapId}`,
+      });
+    } else if (isMilestoneUpcoming(m, today)) {
+      out.push({
+        id: `milestone-upcoming-${m.id}`,
+        severity: "medium",
+        situation: "roadmap_risk",
+        title: `Milestone due soon: ${m.title}`,
+        detail: `Target ${m.targetDate}.`,
+        ownerUserId: m.ownerUserId,
+        dueDate: m.targetDate,
+        link: `/plan/roadmaps/${m.roadmapId}`,
       });
     }
   }
@@ -192,7 +204,7 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
           : `${RENEWAL_BAND_LABELS[status.band]} — renewal due ${s.renewalDate ?? "soon"}.`,
       ownerUserId: null,
       dueDate: s.renewalDate,
-      link: `/solutions/${s.id}`,
+      link: `/programs/solutions/${s.id}`,
     });
   }
 
@@ -206,7 +218,7 @@ export function deriveDecisions(inputs: CommandInputs, today: string): Decision[
         detail: `Expires ${e.expirationDate}.`,
         ownerUserId: e.ownerUserId,
         dueDate: e.expirationDate,
-        link: "/evidence",
+        link: "/programs/evidence",
       });
     }
   }

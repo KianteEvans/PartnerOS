@@ -95,6 +95,6 @@ export async function draftCaseStudyAction(
     });
   }).catch(() => undefined);
 
-  revalidatePath(`/case-studies/${caseStudyId}`);
+  revalidatePath(`/programs/evidence/case-studies/${caseStudyId}`);
   return { ok: true };
 }

@@ -55,14 +55,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       const repRows = await tx.select({ id: reports.id, label: reports.title }).from(reports).where(ilike(reports.title, like)).limit(PER_SOURCE);
 
       return [
-        taskRows.map((r): SearchResult => ({ id: r.id, type: "Task", label: r.label, href: `/tasks?q=${enc(r.label)}` })),
+        taskRows.map((r): SearchResult => ({ id: r.id, type: "Task", label: r.label, href: `/command/tasks?q=${enc(r.label)}` })),
         mdfRows.map((r): SearchResult => ({ id: r.id, type: "MDF request", label: r.label, href: `/mdf/${r.id}` })),
         oppRows.map((r): SearchResult => ({ id: r.id, type: "Opportunity", label: r.label, href: `/ace?tab=opportunities&q=${enc(r.label)}` })),
         relRows.map((r): SearchResult => ({ id: r.id, type: "Relationship", label: r.label, href: `/ace?tab=relationships&q=${enc(r.label)}` })),
-        evRows.map((r): SearchResult => ({ id: r.id, type: "Evidence", label: r.label, href: `/evidence?q=${enc(r.label)}` })),
+        evRows.map((r): SearchResult => ({ id: r.id, type: "Evidence", label: r.label, href: `/programs/evidence?q=${enc(r.label)}` })),
         progRows.map((r): SearchResult => ({ id: r.id, type: "Program", label: r.label, href: `/programs/${r.id}` })),
-        assessRows.map((r): SearchResult => ({ id: r.id, type: "Assessment", label: r.label, href: `/assessments/${r.id}` })),
-        roadRows.map((r): SearchResult => ({ id: r.id, type: "Roadmap", label: r.label, href: `/roadmaps/${r.id}` })),
+        assessRows.map((r): SearchResult => ({ id: r.id, type: "Assessment", label: r.label, href: `/plan/${r.id}` })),
+        roadRows.map((r): SearchResult => ({ id: r.id, type: "Roadmap", label: r.label, href: `/plan/roadmaps/${r.id}` })),
         repRows.map((r): SearchResult => ({ id: r.id, type: "Report", label: r.label, href: `/reports/${r.id}` })),
       ];
     });

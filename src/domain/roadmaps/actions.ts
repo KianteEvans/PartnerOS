@@ -73,8 +73,8 @@ export async function createRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/roadmaps");
-  redirect(`/roadmaps/${newId}`);
+  revalidatePath("/plan/roadmaps");
+  redirect(`/plan/roadmaps/${newId}`);
 }
 
 export async function createComposedRoadmap(
@@ -111,8 +111,8 @@ export async function createComposedRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/roadmaps");
-  redirect(`/roadmaps/${newId}`);
+  revalidatePath("/plan/roadmaps");
+  redirect(`/plan/roadmaps/${newId}`);
 }
 
 export async function updateMilestone(
@@ -161,7 +161,7 @@ export async function updateMilestone(
   } catch (err) {
     return failure(err);
   }
-  if (roadmapId) revalidatePath(`/roadmaps/${roadmapId}`);
+  if (roadmapId) revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -187,7 +187,7 @@ export async function setMilestoneStatus(
   } catch (err) {
     return failure(err);
   }
-  if (roadmapId) revalidatePath(`/roadmaps/${roadmapId}`);
+  if (roadmapId) revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -214,7 +214,7 @@ export async function reorderMilestones(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -244,7 +244,7 @@ export async function addMilestone(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -269,7 +269,7 @@ export async function removeMilestone(
   } catch (err) {
     return failure(err);
   }
-  if (roadmapId) revalidatePath(`/roadmaps/${roadmapId}`);
+  if (roadmapId) revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -297,7 +297,7 @@ export async function recomposeRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -323,8 +323,8 @@ export async function duplicateRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/roadmaps");
-  redirect(`/roadmaps/${newId}`);
+  revalidatePath("/plan/roadmaps");
+  redirect(`/plan/roadmaps/${newId}`);
 }
 
 export async function reopenRoadmap(
@@ -348,7 +348,7 @@ export async function reopenRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -377,7 +377,7 @@ export async function replanRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
   return { ok: true };
 }
 
@@ -405,10 +405,10 @@ export async function finalizeRoadmap(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/roadmaps/${roadmapId}`);
-  revalidatePath("/tasks");
+  revalidatePath(`/plan/roadmaps/${roadmapId}`);
+  revalidatePath("/command/tasks");
   // Finalizing a composed roadmap may adopt programs + open a tier plan.
   revalidatePath("/programs");
-  revalidatePath("/tiers");
+  revalidatePath("/programs/tiers");
   return { ok: true };
 }

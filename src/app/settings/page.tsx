@@ -12,6 +12,9 @@ import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
+import { RingGauge } from "@/components/ui/RingGauge";
+import { BarChart } from "@/components/ui/BarChart";
+import { ActivityList } from "@/components/ui/ActivityList";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { ScimPanel } from "@/components/ui/ScimPanel";
@@ -123,6 +126,11 @@ export default async function SettingsPage({
     connLikes,
     today,
   );
+  // Governance posture: how many capabilities fall into each decision bucket.
+  const decisionCounts: Record<string, number> = { auto: 0, recommend: 0, blocked: 0 };
+  for (const { decision } of capabilityMatrix(mode)) {
+    decisionCounts[decision] = (decisionCounts[decision] ?? 0) + 1;
+  }
 
   // Left-nav sections — gated by permission so a viewer never sees an empty pane.
   const sections: { key: SectionKey; label: string }[] = [
@@ -214,6 +222,16 @@ export default async function SettingsPage({
 
               <Panel title="Automation governance">
                 <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>{AUTOMATION_MODE_DESCRIPTIONS[mode]}</p>
+                <div style={{ marginBottom: 14 }}>
+                  <BarChart
+                    formatValue={(n) => String(n)}
+                    data={[
+                      { label: "Automatic", value: decisionCounts.auto ?? 0, color: "var(--accent)" },
+                      { label: "Recommend", value: decisionCounts.recommend ?? 0, color: "var(--warn)" },
+                      { label: "Blocked", value: decisionCounts.blocked ?? 0, color: "var(--muted)" },
+                    ]}
+                  />
+                </div>
                 <div style={{ display: "grid", gap: 4 }}>
                   {capabilityMatrix(mode).map(({ capability, decision }) => (
                     <div key={capability.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, borderBottom: "1px solid var(--border)", paddingBottom: 3 }}>
@@ -412,10 +430,13 @@ export default async function SettingsPage({
           )}
 
           {active === "readiness" && (
-            <Panel title={`Workspace readiness (${readiness.percent}%)`}>
-              <p style={{ color: readiness.launchReady ? "var(--accent)" : "var(--warn)", fontSize: 13, marginTop: 0 }}>
-                {readiness.launchReady ? "Launch-ready: all critical controls satisfied." : "Critical controls incomplete."}
-              </p>
+            <Panel title="Workspace readiness">
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+                <RingGauge value={readiness.percent} color={readiness.launchReady ? "var(--ok)" : "var(--warn)"} caption="ready" size={104} />
+                <p style={{ color: readiness.launchReady ? "var(--ok)" : "var(--warn)", fontSize: 13, margin: 0, fontWeight: 600, minWidth: 180, flex: 1 }}>
+                  {readiness.launchReady ? "Launch-ready: all critical controls satisfied." : "Critical controls incomplete."}
+                </p>
+              </div>
               <div style={{ display: "grid", gap: 4 }}>
                 {readiness.checks.map((c) => (
                   <div key={c.key} style={{ fontSize: 13 }}>
@@ -461,18 +482,14 @@ export default async function SettingsPage({
                 </a>
               }
             >
-              {data.activity.length === 0 ? (
-                <p style={{ color: "var(--muted)", margin: 0 }}>No activity yet.</p>
-              ) : (
-                <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
-                  {data.activity.map((a, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", color: "var(--muted)", borderBottom: "1px solid var(--border)", paddingBottom: 3 }}>
-                      <span><strong style={{ color: "var(--text)" }}>{a.action}</strong> · {a.resourceType}</span>
-                      <span>{a.actorUserId ? emailById.get(a.actorUserId) ?? "—" : "system"} · {a.createdAt.toISOString().slice(0, 16).replace("T", " ")}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <ActivityList
+                items={data.activity.map((a) => ({
+                  action: a.action,
+                  resourceType: a.resourceType,
+                  actor: a.actorUserId ? emailById.get(a.actorUserId) ?? "—" : "system",
+                  at: a.createdAt,
+                }))}
+              />
             </Panel>
           )}
         </div>

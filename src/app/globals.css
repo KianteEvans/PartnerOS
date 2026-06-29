@@ -104,6 +104,34 @@
   --surface-tint-danger: color-mix(in srgb, var(--danger) 13%, var(--panel));
 }
 
+/* ---------------------------------------------------------------------------
+   Per-section accent identity. `data-section` is set on <html> by the pre-paint
+   script (no flash) + the SectionTheme client on SPA navigation. Un-themed routes
+   (home/settings) fall back to the orange brand accent, so actions stay orange
+   while each section's nav/tabs/hero take their own colour.
+--------------------------------------------------------------------------- */
+:root { --section-accent: var(--accent); }
+:root[data-section="command"]  { --section-accent: #6366f1; }
+:root[data-section="ace"]      { --section-accent: #0d9488; }
+:root[data-section="mdf"]      { --section-accent: #d97706; }
+:root[data-section="programs"] { --section-accent: #7c3aed; }
+:root[data-section="plan"]     { --section-accent: #059669; }
+:root[data-section="reports"]  { --section-accent: #2563eb; }
+:root[data-theme="dark"][data-section="command"]  { --section-accent: #818cf8; }
+:root[data-theme="dark"][data-section="ace"]      { --section-accent: #2dd4bf; }
+:root[data-theme="dark"][data-section="mdf"]      { --section-accent: #f59e0b; }
+:root[data-theme="dark"][data-section="programs"] { --section-accent: #a78bfa; }
+:root[data-theme="dark"][data-section="plan"]     { --section-accent: #34d399; }
+:root[data-theme="dark"][data-section="reports"]  { --section-accent: #60a5fa; }
+/* A themed section's hero glows its own colour (un-themed keeps the blue tint). */
+:root[data-section] {
+  --surface-hero: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--section-accent) 11%, var(--panel)),
+    var(--panel) 60%
+  );
+}
+
 * {
   box-sizing: border-box;
 }
@@ -465,6 +493,85 @@ a {
 
 /* Footer quick-links brighten on hover. */
 .foot-link:hover {
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   Data-viz flourish — gradient charts sweep / grow / draw in on load, and the
+   primary CTA gets a soft accent glow on hover. All motion is disabled under
+   prefers-reduced-motion (matching the drawer/toast/palette convention above).
+--------------------------------------------------------------------------- */
+/* RingGauge: the arc sweeps from hidden (offset = circumference) to its value. */
+.pos-ring-arc {
+  animation: pos-ring-sweep 1.05s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both;
+}
+@keyframes pos-ring-sweep {
+  from {
+    stroke-dashoffset: var(--ring-circ, 0);
+  }
+}
+/* BarChart: each fill grows from 0 to its inline width. */
+.pos-bar-fill {
+  animation: pos-bar-grow 0.85s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both;
+}
+@keyframes pos-bar-grow {
+  from {
+    width: 0;
+  }
+}
+/* Sparkline: the line draws left-to-right (polyline uses pathLength="1"). */
+.pos-spark-line {
+  stroke-dasharray: 1;
+  animation: pos-spark-draw 1.05s ease 0.15s both;
+}
+@keyframes pos-spark-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* DeltaChip opt-in pulse on a big swing. */
+.pos-delta-pulse {
+  animation: pos-delta-pulse 1.6s ease-in-out 2;
+}
+@keyframes pos-delta-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.09);
+  }
+}
+/* Primary CTA glow. The Button primitive owns its box-shadow here (not inline) so
+   this :hover rule can win — an inline box-shadow would otherwise out-specify it. */
+.pos-btn-primary {
+  box-shadow: var(--shadow-sm);
+  transition:
+    box-shadow 0.16s ease,
+    transform 0.06s ease;
+}
+.pos-btn-primary:hover {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent),
+    0 4px 16px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pos-ring-arc,
+  .pos-bar-fill,
+  .pos-spark-line,
+  .pos-delta-pulse {
+    animation: none;
+  }
+  .pos-spark-line {
+    stroke-dasharray: none;
+  }
+}
+
+/* Marketing nav anchors brighten on hover. */
+.marketing-nav-link:hover {
   color: var(--text);
 }
 

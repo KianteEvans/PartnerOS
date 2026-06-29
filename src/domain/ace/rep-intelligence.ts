@@ -204,3 +204,30 @@ export function repHealthSummary(healths: readonly RepHealth[]): RepHealthSummar
     pipelineAtRisk,
   };
 }
+
+/** The cooling relationships to re-engage first: open pipeline at stake, biggest + coldest first. */
+export function reEngageQueue(healths: readonly RepHealth[], limit = 5): RepHealth[] {
+  return healths
+    .filter((h) => h.atStake)
+    .slice()
+    .sort((a, b) => b.openValue - a.openValue || a.score - b.score)
+    .slice(0, limit);
+}
+
+export interface TimelineTouch {
+  readonly occurredOn: string;
+  readonly kind: string;
+}
+
+/** A contact's most recent touches in chronological order (oldest -> newest) for a timeline strip. */
+export function interactionTimeline(
+  interactions: readonly { contactId: string; occurredOn: string; kind: string }[],
+  contactId: string,
+  limit = 8,
+): TimelineTouch[] {
+  return interactions
+    .filter((i) => i.contactId === contactId)
+    .map((i) => ({ occurredOn: i.occurredOn, kind: i.kind }))
+    .sort((a, b) => a.occurredOn.localeCompare(b.occurredOn))
+    .slice(-limit);
+}

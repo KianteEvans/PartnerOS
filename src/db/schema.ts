@@ -909,6 +909,7 @@ export const competencyApplications = pgTable(
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     solutionId: uuid("solution_id").references(() => solutions.id, { onDelete: "set null" }),
+    programId: uuid("program_id").references(() => programs.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1539,6 +1540,48 @@ export const metricSnapshots = pgTable(
   (t) => [uniqueIndex("metric_snapshots_tenant_day_key").on(t.tenantId, t.capturedOn)],
 );
 
+// Co-Selling Goals: org-set targets for the AWS co-sell relationship, tracked on
+// the ACE page. RLS in drizzle/0034_ace_goals.sql, lockstep. target_value is
+// bigint (revenue targets can exceed the 2.1B integer ceiling).
+export const aceGoals = pgTable(
+  "ace_goals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    metricKey: text("metric_key").notNull(),
+    targetValue: bigint("target_value", { mode: "number" }).notNull(),
+    periodStart: date("period_start").notNull(),
+    targetDeadline: date("target_deadline"),
+    status: text("status").notNull().default("active"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ace_goals_tenant_idx").on(t.tenantId)],
+);
+
+// Daily progress series per goal for the trend sparkline; materialized-on-read on
+// ACE load (idempotent via the tenant/goal/day unique index).
+export const aceGoalSnapshots = pgTable(
+  "ace_goal_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id")
+      .notNull()
+      .references(() => aceGoals.id, { onDelete: "cascade" }),
+    capturedOn: date("captured_on").notNull(),
+    currentValue: bigint("current_value", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("ace_goal_snapshots_goal_day_key").on(t.tenantId, t.goalId, t.capturedOn)],
+);
+
 // ----------------------------------------------------------------------------
 // Settings & Integrations (domain). RLS in drizzle/0011_settings.sql, lockstep.
 // One settings row per tenant; one connector per (tenant, kind).
@@ -1620,6 +1663,27 @@ export const connectors = pgTable(
   ],
 );
 
+// ----------------------------------------------------------------------------
+// Demo requests (marketing). RLS-FREE and tenant-FREE by design: these are
+// vendor-level sales leads captured by the public landing form via withSystem.
+// Lockstep migration: drizzle/0032_demo_requests.sql.
+// ----------------------------------------------------------------------------
+
+export const demoRequests = pgTable(
+  "demo_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    company: text("company").notNull(),
+    teamSize: text("team_size"),
+    message: text("message"),
+    status: text("status").notNull().default("new"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("demo_requests_created_idx").on(t.createdAt)],
+);
+
 export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -1663,3 +1727,5 @@ export type WorkspaceSettings = typeof workspaceSettings.$inferSelect;
 export type NewWorkspaceSettings = typeof workspaceSettings.$inferInsert;
 export type Connector = typeof connectors.$inferSelect;
 export type NewConnector = typeof connectors.$inferInsert;
+export type DemoRequest = typeof demoRequests.$inferSelect;
+export type NewDemoRequest = typeof demoRequests.$inferInsert;

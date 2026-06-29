@@ -6,6 +6,8 @@ import {
   repHealth,
   computeRepHealth,
   repHealthSummary,
+  reEngageQueue,
+  interactionTimeline,
   RECENCY_WINDOW_DAYS,
   type RepRelationship,
   type RepOpp,
@@ -184,5 +186,41 @@ describe("repHealthSummary", () => {
       atRiskCount: 0,
       pipelineAtRisk: 0,
     });
+  });
+});
+
+describe("reEngageQueue", () => {
+  it("returns only at-stake relationships, biggest pipeline first, capped at the limit", () => {
+    const rels = [
+      rel({ id: "healthy", accountName: "Acme", strength: 80, lastContact: TODAY }),
+      rel({ id: "small", accountName: "Beta", strength: 80, lastContact: "2026-01-01" }),
+      rel({ id: "big", accountName: "Gamma", strength: 80, lastContact: "2026-01-01" }),
+    ];
+    const opps = [
+      opp({ accountName: "Acme", amount: 100_000 }),
+      opp({ accountName: "Beta", amount: 50_000 }),
+      opp({ accountName: "Gamma", amount: 400_000 }),
+    ];
+    const healths = computeRepHealth(rels, opps, TODAY);
+    expect(reEngageQueue(healths).map((h) => h.id)).toEqual(["big", "small"]); // healthy excluded
+    expect(reEngageQueue(healths, 1).map((h) => h.id)).toEqual(["big"]);
+  });
+});
+
+describe("interactionTimeline", () => {
+  const ix = [
+    { contactId: "r1", occurredOn: "2026-06-01", kind: "meeting" },
+    { contactId: "r1", occurredOn: "2026-06-10", kind: "email" },
+    { contactId: "r1", occurredOn: "2026-05-01", kind: "call" },
+    { contactId: "r2", occurredOn: "2026-06-20", kind: "qbr" },
+  ];
+
+  it("returns a contact's touches in chronological order", () => {
+    expect(interactionTimeline(ix, "r1").map((t) => t.occurredOn)).toEqual(["2026-05-01", "2026-06-01", "2026-06-10"]);
+  });
+
+  it("caps to the most recent N (still chronological) and is empty for an unknown contact", () => {
+    expect(interactionTimeline(ix, "r1", 2).map((t) => t.occurredOn)).toEqual(["2026-06-01", "2026-06-10"]);
+    expect(interactionTimeline(ix, "rX")).toEqual([]);
   });
 });

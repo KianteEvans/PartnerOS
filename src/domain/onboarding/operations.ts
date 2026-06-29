@@ -1,13 +1,16 @@
 import { and, eq, sql } from "drizzle-orm";
-import { onboarding } from "@/db/schema";
+import { onboarding, tenants } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
 import { createAssessmentOp } from "@/domain/assessments/operations";
 import { createSourcedTask } from "@/domain/tasks/operations";
+import { createComposedRoadmapOp } from "@/domain/roadmaps/operations";
 import {
   normalizeObjectives,
   pathToPreset,
   kickoffTasks,
+  stageToTier,
+  starterRoadmapSelection,
   type OnboardingStepId,
   type PathId,
 } from "@/domain/onboarding/catalog";
@@ -109,7 +112,7 @@ export async function setStepOp(
  */
 export async function completeOnboardingOp(
   ctx: MutationContext,
-): Promise<{ assessmentId: string; tasks: number }> {
+): Promise<{ assessmentId: string; tasks: number; roadmapId: string | null }> {
   const { identity, tx } = ctx;
   const [row] = await tx
     .select({
@@ -118,6 +121,8 @@ export async function completeOnboardingOp(
       step: onboarding.step,
       path: onboarding.path,
       companyName: onboarding.companyName,
+      objectives: onboarding.objectives,
+      awsStage: onboarding.awsStage,
     })
     .from(onboarding)
     .where(eq(onboarding.tenantId, identity.tenantId));
@@ -129,6 +134,7 @@ export async function completeOnboardingOp(
     throw new ValidationError("Finish the earlier steps first");
   }
   const path = row.path as PathId;
+  const objectives = Array.isArray(row.objectives) ? (row.objectives as string[]) : [];
 
   const { id: assessmentId } = await createAssessmentOp(ctx, {
     name: `${row.companyName ?? "Workspace"} — Initial Readiness`,
@@ -136,7 +142,8 @@ export async function completeOnboardingOp(
     targetProgram: null,
   });
 
-  const seeds = kickoffTasks(path);
+  // Kickoff tasks: baseline + path + one per stated objective.
+  const seeds = kickoffTasks(path, objectives);
   for (const t of seeds) {
     await createSourcedTask(ctx, {
       title: t.title,
@@ -145,6 +152,35 @@ export async function completeOnboardingOp(
       source: "onboarding",
       sourceRef: `${row.id}:${t.key}`,
     });
+  }
+
+  // Starting tier estimate from the self-reported AWS stage — guarded upward-only
+  // (only initializes a still-default workspace, never overwrites or downgrades).
+  const startTier = stageToTier(row.awsStage);
+  if (startTier !== "registered") {
+    await tx
+      .update(tenants)
+      .set({ tier: startTier })
+      .where(and(eq(tenants.id, identity.tenantId), eq(tenants.tier, "registered")));
+  }
+
+  // Starter roadmap: compose a draft from the path + objectives + stage. Skipped
+  // when there's nothing to seed (e.g. Premier with no competency goal).
+  const selection = starterRoadmapSelection(path, objectives, row.awsStage);
+  let roadmapId: string | null = null;
+  if (selection.programKeys.length > 0 || selection.targetTier !== null) {
+    const today = new Date().toISOString().slice(0, 10);
+    const composed = await createComposedRoadmapOp(ctx, {
+      name: `${row.companyName ?? "Workspace"} — Starter Roadmap`,
+      objective: "Reach your next AWS tier and earn a foundational Competency",
+      horizon: "m6",
+      scenario: "standard",
+      startDate: today,
+      programKeys: selection.programKeys,
+      targetTier: selection.targetTier,
+      owners: {},
+    });
+    roadmapId = composed.id;
   }
 
   const done = await tx
@@ -168,5 +204,5 @@ export async function completeOnboardingOp(
     throw new ValidationError("Onboarding is already complete");
   }
 
-  return { assessmentId, tasks: seeds.length };
+  return { assessmentId, tasks: seeds.length, roadmapId };
 }

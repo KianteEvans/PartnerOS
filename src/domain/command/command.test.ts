@@ -124,9 +124,34 @@ describe("command brief", () => {
     expect(od).toBeTruthy();
     expect(od!.situation).toBe("roadmap_risk");
     expect(od!.severity).toBe("high");
-    expect(od!.link).toBe("/roadmaps/rm1");
+    expect(od!.link).toBe("/plan/roadmaps/rm1");
     expect(d.some((x) => x.id === "milestone-ms2")).toBe(false);
     expect(d.some((x) => x.id === "milestone-ms3")).toBe(false);
+  });
+
+  it("warns on a milestone due soon (within the look-ahead window) before it slips", () => {
+    const d = deriveDecisions(
+      inputs({
+        milestones: [
+          { id: "up1", roadmapId: "rm2", title: "Submit application", status: "in_progress", targetDate: "2026-06-27", ownerUserId: "u1" }, // due in 4d -> upcoming
+          { id: "od1", roadmapId: "rm2", title: "Past due", status: "planned", targetDate: "2026-01-01", ownerUserId: "u1" }, // overdue
+          { id: "far1", roadmapId: "rm2", title: "Way out", status: "planned", targetDate: "2026-12-01", ownerUserId: "u1" }, // beyond window
+          { id: "done1", roadmapId: "rm2", title: "Finished early", status: "done", targetDate: "2026-06-27", ownerUserId: "u1" }, // done -> nothing
+        ],
+      }),
+      TODAY,
+    );
+    const up = d.find((x) => x.id === "milestone-upcoming-up1");
+    expect(up).toBeTruthy();
+    expect(up!.severity).toBe("medium");
+    expect(up!.situation).toBe("roadmap_risk");
+    expect(up!.link).toBe("/plan/roadmaps/rm2");
+    // Overdue stays high, and the two states are mutually exclusive.
+    expect(d.find((x) => x.id === "milestone-od1")!.severity).toBe("high");
+    expect(d.some((x) => x.id === "milestone-upcoming-od1")).toBe(false);
+    // Beyond-window and done milestones produce nothing.
+    expect(d.some((x) => x.id.includes("far1"))).toBe(false);
+    expect(d.some((x) => x.id.includes("done1"))).toBe(false);
   });
 
   it("flags a Specialization Solution whose renewal is slipping; spares the compliant one", () => {
@@ -144,7 +169,7 @@ describe("command brief", () => {
     expect(r).toBeTruthy();
     expect(r!.situation).toBe("renewal_due");
     expect(r!.severity).toBe("high"); // one gap -> at_risk
-    expect(r!.link).toBe("/solutions/s1");
+    expect(r!.link).toBe("/programs/solutions/s1");
     expect(d.some((x) => x.id === "solution-renewal-s2")).toBe(false); // compliant -> no signal
   });
 

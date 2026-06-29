@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { can } from "@/authz/permissions";
@@ -9,6 +9,9 @@ import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { Table } from "@/components/ui/Table";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { BarChart } from "@/components/ui/BarChart";
 import {
   AUDIT_PAGE_SIZE,
   auditQueryString,
@@ -80,11 +83,20 @@ export default async function AuditPage({
       .select({ id: users.id, email: users.email })
       .from(users)
       .where(eq(users.tenantId, identity.tenantId));
+    // Events-per-day over the last 30 days (honours the active filters).
+    const since = new Date(Date.now() - 30 * 86_400_000);
+    const perDay = await tx
+      .select({ day: sql<string>`date(${auditLog.createdAt})`, n: count() })
+      .from(auditLog)
+      .where(and(where, gte(auditLog.createdAt, since)))
+      .groupBy(sql`date(${auditLog.createdAt})`)
+      .orderBy(sql`date(${auditLog.createdAt})`);
     return {
       rows,
       total,
       resourceTypes: resourceTypes.map((r) => r.rt).sort(),
       members,
+      perDay,
     };
   });
 
@@ -115,6 +127,21 @@ export default async function AuditPage({
           </a>
         }
       />
+
+      <MetricStrip min={150}>
+        <MetricCard label="Total events" value={data.total.toLocaleString()} />
+        <MetricCard label="Resource types" value={String(data.resourceTypes.length)} />
+        <MetricCard label="Team members" value={String(data.members.length)} />
+      </MetricStrip>
+
+      {data.perDay.length > 0 && (
+        <Panel title="Activity over time (30 days)">
+          <BarChart
+            formatValue={(n) => String(n)}
+            data={data.perDay.map((d) => ({ label: String(d.day).slice(5), value: Number(d.n), color: "var(--accent-2)" }))}
+          />
+        </Panel>
+      )}
 
       <Panel title="Filters">
         <form method="get" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>

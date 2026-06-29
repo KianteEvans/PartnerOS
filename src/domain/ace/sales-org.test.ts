@@ -7,9 +7,12 @@ import {
   rollupByAccount,
   coverageGaps,
   salesOrgSummary,
+  repPortfolio,
+  roleWinRates,
   type SalesOrgRel,
   type SalesOrgOpp,
   type TeamEdge,
+  type PortfolioOpp,
 } from "@/domain/ace/sales-org";
 
 const rels: SalesOrgRel[] = [
@@ -117,5 +120,50 @@ describe("salesOrgSummary", () => {
     const s = salesOrgSummary(opps, rollups, gaps);
     // o1 (100k) + o3 (30k) open; o2 (50k) won. NOT 230k from summing per-rep openTCV.
     expect(s).toEqual({ reps: 2, openTCV: 130_000, closedWonTCV: 50_000, gaps: 1 });
+  });
+});
+
+describe("repPortfolio", () => {
+  const staged: PortfolioOpp[] = [
+    { id: "o1", accountName: "Acme", status: "open", amount: 100_000, stage: "qualified" },
+    { id: "o2", accountName: "Acme", status: "won", amount: 50_000, stage: "committed" },
+    { id: "o3", accountName: "Globex", status: "open", amount: 30_000, stage: "prospect" },
+  ];
+
+  it("groups a rep's OPEN opps by stage (desc TCV) + lists distinct accounts/titles", () => {
+    const p = repPortfolio("r2", edges, staged); // r2: psm on o1 (open) + o3 (open)
+    expect(p.titles).toEqual(["psm"]);
+    expect(p.accounts).toEqual(["Acme", "Globex"]);
+    expect(p.openTCV).toBe(130_000);
+    expect(p.wonTCV).toBe(0);
+    expect(p.stages.map((s) => [s.stage, s.count, s.openTCV])).toEqual([
+      ["qualified", 1, 100_000],
+      ["prospect", 1, 30_000],
+    ]);
+  });
+
+  it("separates won from open pipeline", () => {
+    const p = repPortfolio("r1", edges, staged); // r1: sales_rep on o1 (open) + o2 (won)
+    expect(p.openTCV).toBe(100_000);
+    expect(p.wonTCV).toBe(50_000);
+    expect(p.stages).toEqual([{ stage: "qualified", count: 1, openTCV: 100_000 }]);
+  });
+});
+
+describe("roleWinRates", () => {
+  it("computes per-title win rate over decided deals; null when none decided", () => {
+    const o: SalesOrgOpp[] = [
+      { id: "a", accountName: "X", status: "won", amount: 1 },
+      { id: "b", accountName: "X", status: "lost", amount: 1 },
+      { id: "c", accountName: "X", status: "open", amount: 1 },
+    ];
+    const e: TeamEdge[] = [
+      { opportunityId: "a", relationshipId: "r1", title: "aws_sales_rep" },
+      { opportunityId: "b", relationshipId: "r1", title: "aws_sales_rep" }, // 1 won / 1 lost
+      { opportunityId: "c", relationshipId: "r2", title: "psm" }, // only open
+    ];
+    const wr = roleWinRates(e, o);
+    expect(wr.find((w) => w.title === "aws_sales_rep")).toEqual({ title: "aws_sales_rep", won: 1, lost: 1, winRate: 50 });
+    expect(wr.find((w) => w.title === "psm")!.winRate).toBeNull();
   });
 });

@@ -31,6 +31,7 @@ import {
   stepIndex,
   pathToPreset,
   kickoffTasks,
+  FIELD_HELP,
   type OnboardingStepId,
   type PathId,
 } from "@/domain/onboarding/catalog";
@@ -174,20 +175,24 @@ function StepBody({
     return (
       <Panel title="Platform unlocked 🎉">
         <p style={{ color: "var(--muted)", marginTop: 0 }}>
-          Onboarding is complete. We created a starter readiness assessment and
-          seeded your initial tasks.
+          Onboarding is complete. We seeded a starter readiness assessment, kickoff
+          tasks, and a roadmap tailored to your goals. Your workspace home now has a
+          “Getting started” checklist that guides your first moves.
         </p>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+          <Link href="/" style={linkBtn}>
+            Go to workspace
+          </Link>
           {row.assessmentId && (
-            <Link href={`/assessments/${row.assessmentId}`} style={linkBtn}>
+            <Link href={`/plan/${row.assessmentId}`} style={linkBtnGhost}>
               Open starter assessment
             </Link>
           )}
-          <Link href="/tasks" style={linkBtn}>
-            View seeded tasks
+          <Link href="/plan/roadmaps" style={linkBtnGhost}>
+            View starter roadmap
           </Link>
-          <Link href="/" style={linkBtnGhost}>
-            Go to workspace
+          <Link href="/command/tasks" style={linkBtnGhost}>
+            View seeded tasks
           </Link>
         </div>
       </Panel>
@@ -217,11 +222,12 @@ function StepBody({
               defaultValue={row.companyName ?? ""}
               style={controlStyle}
             />
+            <span style={helpStyle}>{FIELD_HELP.companyName}</span>
           </label>
-          <Select name="industry" label="Industry" options={INDUSTRY_OPTIONS} value={row.industry} />
-          <Select name="partnerType" label="Partner type" options={PARTNER_TYPE_OPTIONS} value={row.partnerType} />
-          <Select name="awsStage" label="Current AWS stage" options={AWS_STAGE_OPTIONS} value={row.awsStage} />
-          <Select name="teamSize" label="Team size" options={TEAM_SIZE_OPTIONS} value={row.teamSize} />
+          <Select name="industry" label="Industry" options={INDUSTRY_OPTIONS} value={row.industry} help={FIELD_HELP.industry} />
+          <Select name="partnerType" label="Partner type" options={PARTNER_TYPE_OPTIONS} value={row.partnerType} help={FIELD_HELP.partnerType} />
+          <Select name="awsStage" label="Current AWS stage" options={AWS_STAGE_OPTIONS} value={row.awsStage} help={FIELD_HELP.awsStage} />
+          <Select name="teamSize" label="Team size" options={TEAM_SIZE_OPTIONS} value={row.teamSize} help={FIELD_HELP.teamSize} />
         </MutationForm>
       </Panel>
     );
@@ -231,6 +237,7 @@ function StepBody({
     const chosen = new Set((row.objectives as string[]) ?? []);
     return (
       <Panel title="What are your partnership objectives?">
+        <p style={{ ...helpStyle, margin: "0 0 10px" }}>{FIELD_HELP.objectives}</p>
         <MutationForm action={saveObjectives} submitLabel="Continue">
           <div style={{ display: "grid", gap: 10 }}>
             {OBJECTIVE_OPTIONS.map((o) => (
@@ -256,6 +263,7 @@ function StepBody({
   if (step === "path") {
     return (
       <Panel title="Choose a guided path">
+        <p style={{ ...helpStyle, margin: "0 0 10px" }}>{FIELD_HELP.path}</p>
         <MutationForm action={choosePath} submitLabel="Continue">
           <div style={{ display: "grid", gap: 12 }}>
             {PATH_OPTIONS.map((p, i) => (
@@ -327,7 +335,8 @@ function StepBody({
           </p>
           <ul style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
             <li>A “{PRESET_LABELS[pathToPreset(path)]}” starter assessment.</li>
-            {kickoffTasks(path).map((t) => (
+            <li>A starter roadmap toward your next AWS tier, tailored to your goals.</li>
+            {kickoffTasks(path, (row.objectives as string[]) ?? []).map((t) => (
               <li key={t.key}>{t.title}</li>
             ))}
           </ul>
@@ -345,16 +354,20 @@ function StepBody({
   );
 }
 
+const helpStyle = { fontSize: 11, color: "var(--muted)" } as const;
+
 function Select({
   name,
   label,
   options,
   value,
+  help,
 }: {
   name: string;
   label: string;
   options: readonly string[];
   value: string | null;
+  help?: string | undefined;
 }): ReactNode {
   return (
     <label style={labelStyle}>
@@ -369,6 +382,7 @@ function Select({
           </option>
         ))}
       </select>
+      {help ? <span style={helpStyle}>{help}</span> : null}
     </label>
   );
 }

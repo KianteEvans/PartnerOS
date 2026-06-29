@@ -59,8 +59,8 @@ export async function createSolution(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/solutions");
-  redirect(`/solutions/${newId}`);
+  revalidatePath("/programs");
+  redirect(`/programs/solutions/${newId}`);
 }
 
 export async function updateSolution(
@@ -101,7 +101,7 @@ export async function updateSolution(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/solutions/${solutionId}`);
-  revalidatePath("/solutions");
+  revalidatePath(`/programs/solutions/${solutionId}`);
+  revalidatePath("/programs");
   return { ok: true };
 }

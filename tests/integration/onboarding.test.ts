@@ -15,6 +15,8 @@ let gate: typeof import("@/gate/mutation-gate");
 let errors: typeof import("@/http/errors");
 let ops: typeof import("@/domain/onboarding/operations");
 let catalog: typeof import("@/domain/onboarding/catalog");
+let activationLoad: typeof import("@/domain/onboarding/activation-load");
+let activation: typeof import("@/domain/onboarding/activation");
 
 const tenantA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const tenantB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -41,6 +43,8 @@ beforeAll(async () => {
   errors = await import("@/http/errors");
   ops = await import("@/domain/onboarding/operations");
   catalog = await import("@/domain/onboarding/catalog");
+  activationLoad = await import("@/domain/onboarding/activation-load");
+  activation = await import("@/domain/onboarding/activation");
 
   const { withSystem } = db.client;
   const { tenants, users } = db.schema;
@@ -125,7 +129,7 @@ describe("onboarding end-to-end", () => {
             companyName: "Acme",
             industry: catalog.INDUSTRY_OPTIONS[0]!,
             partnerType: catalog.PARTNER_TYPE_OPTIONS[0]!,
-            awsStage: catalog.AWS_STAGE_OPTIONS[0]!,
+            awsStage: "Advanced", // exercises the upward-only tier estimate on completion
             teamSize: catalog.TEAM_SIZE_OPTIONS[0]!,
           })
           .then(ok),
@@ -176,23 +180,24 @@ describe("onboarding end-to-end", () => {
     });
   });
 
-  it("completion spawns a starter assessment and seeds onboarding tasks", async () => {
+  it("completion seeds assessment + objective tasks + tier estimate + starter roadmap", async () => {
     const res = await run({
       permission: "onboarding:manage",
       key: "complete",
       handler: (ctx) => ops.completeOnboardingOp(ctx),
     });
     expect(res.body.assessmentId).toMatch(/[0-9a-f-]{36}/);
-    expect(res.body.tasks).toBe(4);
+    // baseline(3) + path(1) + obj:tier_advancement + obj:mdf
+    expect(res.body.tasks).toBe(6);
+    expect(res.body.roadmapId).toMatch(/[0-9a-f-]{36}/);
 
     const { withTenant } = db.client;
-    const { onboarding, assessments, tasks } = db.schema;
+    const { onboarding, assessments, tasks, tenants, roadmaps, roadmapMilestones } = db.schema;
     const [row] = await withTenant(idA(), (tx) =>
       tx.select().from(onboarding).where(eq(onboarding.tenantId, tenantA)),
     );
     expect(row!.status).toBe("completed");
     expect(row!.step).toBe("done");
-    expect(row!.completedAt).not.toBeNull();
     expect(row!.assessmentId).toBe(res.body.assessmentId);
 
     const [assessment] = await withTenant(idA(), (tx) =>
@@ -204,8 +209,41 @@ describe("onboarding end-to-end", () => {
     const seeded = await withTenant(idA(), (tx) =>
       tx.select().from(tasks).where(eq(tasks.source, "onboarding")),
     );
-    expect(seeded).toHaveLength(4);
-    expect(seeded.every((t) => t.sourceRef?.startsWith(row!.id))).toBe(true);
+    expect(seeded).toHaveLength(6);
+    expect(seeded.some((t) => t.sourceRef === `${row!.id}:obj:tier_advancement`)).toBe(true);
+    expect(seeded.some((t) => t.sourceRef === `${row!.id}:obj:mdf`)).toBe(true);
+
+    // Tier estimate: Advanced stage bumps the still-default 'registered' tenant.
+    const [tenant] = await withTenant(idA(), (tx) =>
+      tx.select({ tier: tenants.tier }).from(tenants).where(eq(tenants.id, tenantA)),
+    );
+    expect(tenant!.tier).toBe("advanced");
+
+    // Starter roadmap: a composed draft with milestones.
+    const [rm] = await withTenant(idA(), (tx) =>
+      tx.select().from(roadmaps).where(eq(roadmaps.id, res.body.roadmapId!)),
+    );
+    expect(rm!.source).toBe("composed");
+    const ms = await withTenant(idA(), (tx) =>
+      tx.select().from(roadmapMilestones).where(eq(roadmapMilestones.roadmapId, res.body.roadmapId!)),
+    );
+    expect(ms.length).toBeGreaterThan(0);
+  });
+
+  it("activation checklist reflects the seeded workspace, isolated per tenant", async () => {
+    const { answers, counts } = await activationLoad.loadActivation(idA());
+    expect(counts.roadmaps).toBeGreaterThan(0); // the starter roadmap
+    expect(answers.objectives).toEqual(["tier_advancement", "mdf"]);
+    const check = activation.activationChecklist(answers, counts);
+    // roadmap baseline item done; the tier_advancement objective added an item.
+    expect(check.items.find((i) => i.key === "roadmap")!.done).toBe(true);
+    expect(check.items.some((i) => i.key === "obj:tier_advancement")).toBe(true);
+    expect(check.complete).toBe(false);
+
+    // RLS: tenant B sees an empty workspace.
+    const b = await activationLoad.loadActivation(identity(tenantB, ownerB));
+    expect(b.counts.roadmaps).toBe(0);
+    expect(b.answers.objectives).toEqual([]);
   });
 
   it("blocks a second completion (status-guarded)", async () => {

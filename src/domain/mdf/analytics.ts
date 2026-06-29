@@ -105,6 +105,18 @@ export interface PortfolioSummary {
   readonly openCount: number;
 }
 
+/** Percent of approved funds that have been reimbursed (0 if nothing approved). */
+export function reimbursementRate(s: PortfolioSummary): number {
+  return s.approved > 0 ? Math.min(100, Math.round((s.reimbursed / s.approved) * 100)) : 0;
+}
+
+/** Percent of a request's approved amount that has been claimed (0 if nothing approved). */
+export function claimedShare(req: MdfLike): number {
+  const approved = req.approvedAmount ?? 0;
+  if (approved <= 0) return 0;
+  return Math.min(100, Math.round(((req.claimedAmount ?? 0) / approved) * 100));
+}
+
 function sum(reqs: readonly MdfLike[], pick: (r: MdfLike) => number | null): number {
   return reqs.reduce((acc, r) => acc + (pick(r) ?? 0), 0);
 }

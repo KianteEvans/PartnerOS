@@ -220,6 +220,8 @@ export interface SourcedTaskInput {
   readonly sourceRef: string;
   /** Optional initial owner (the caller is responsible for tenant validity). */
   readonly ownerUserId?: string | null;
+  /** Optional due date (ISO yyyy-mm-dd) carried from the originating object. */
+  readonly dueDate?: string | null;
 }
 
 /**
@@ -241,6 +243,7 @@ export async function createSourcedTask(
       source: input.source,
       sourceRef: input.sourceRef,
       ownerUserId: input.ownerUserId ?? null,
+      dueDate: input.dueDate ?? null,
       createdBy: identity.userId,
     })
     .onConflictDoNothing({

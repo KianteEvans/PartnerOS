@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { setupTestDb } from "../helpers/embedded-pg";
 import type { TestDb } from "../helpers/embedded-pg";
 import type { MutationContext } from "@/gate/mutation-gate";
@@ -149,6 +149,54 @@ describe("competency applications", () => {
     expect(app!.status).toBe("ready");
   });
 
+  it("bulk-applies status + Met? to selected controls and rolls the count up", async () => {
+    const { withTenant } = db.client;
+    const { applicationControls, competencyApplications } = db.schema;
+    const ids = (
+      await withTenant(idA(), (tx) =>
+        tx.select({ id: applicationControls.id }).from(applicationControls).where(eq(applicationControls.applicationId, appId)),
+      )
+    ).map((c) => c.id);
+
+    // Bulk re-open everything -> parent reverts to draft, acceptedCount 0.
+    await run("application:update", "bulk-open", (ctx) =>
+      ops.bulkUpdateControlsOp(ctx, { applicationId: appId, ids, status: "open" }),
+    );
+    const [draft] = await withTenant(idA(), (tx) =>
+      tx.select().from(competencyApplications).where(eq(competencyApplications.id, appId)),
+    );
+    expect(draft!.acceptedCount).toBe(0);
+    expect(draft!.status).toBe("draft");
+
+    // Bulk accept + set Met? -> parent flips back to ready.
+    const res = await run("application:update", "bulk-accept", (ctx) =>
+      ops.bulkUpdateControlsOp(ctx, { applicationId: appId, ids, status: "accepted", met: "yes" }),
+    );
+    expect(res.body.count).toBe(3);
+    const [ready] = await withTenant(idA(), (tx) =>
+      tx.select().from(competencyApplications).where(eq(competencyApplications.id, appId)),
+    );
+    expect(ready!.acceptedCount).toBe(3);
+    expect(ready!.status).toBe("ready");
+    const mets = await withTenant(idA(), (tx) =>
+      tx.select({ met: applicationControls.metSuggestion }).from(applicationControls).where(eq(applicationControls.applicationId, appId)),
+    );
+    expect(mets.every((m) => m.met === "yes")).toBe(true);
+
+    // Cross-tenant: tenant B can't touch tenant A's controls (RLS) -> 0 updated, parent unchanged.
+    const cross = await run(
+      "application:update",
+      "bulk-cross",
+      (ctx) => ops.bulkUpdateControlsOp(ctx, { applicationId: appId, ids, status: "open" }),
+      idB,
+    );
+    expect(cross.body.count).toBe(0);
+    const [stillReady] = await withTenant(idA(), (tx) =>
+      tx.select().from(competencyApplications).where(eq(competencyApplications.id, appId)),
+    );
+    expect(stillReady!.status).toBe("ready");
+  });
+
   it("updates packet metadata + AWS status, stamping milestone dates", async () => {
     const { withTenant } = db.client;
     const { competencyApplications } = db.schema;
@@ -239,5 +287,94 @@ describe("competency applications", () => {
         tx.insert(competencyApplications).values({ tenantId: tenantA, name: "forged", controlCount: 0 }),
       ),
     ).rejects.toBeTruthy();
+  });
+});
+
+describe("program linking (lifecycle merge Phase 2)", () => {
+  let load: typeof import("@/domain/applications/load");
+  let programId = "";
+
+  beforeAll(async () => {
+    load = await import("@/domain/applications/load");
+    const { withSystem } = db.client;
+    const { programs } = db.schema;
+    const [p] = await withSystem((tx) =>
+      tx
+        .insert(programs)
+        .values({
+          tenantId: tenantA,
+          libraryKey: "security-competency",
+          name: "Security Competency",
+          programType: "Competency",
+          deliveryModel: "saas",
+          fundingFit: "eligible",
+          status: "active",
+        })
+        .returning({ id: programs.id }),
+    );
+    programId = p!.id;
+  });
+
+  it("links an application to a program and surfaces it on the program workspace", async () => {
+    await run("application:update", "link-prog", (ctx) =>
+      ops.updateApplicationOp(ctx, { applicationId: appId, programId }),
+    );
+    const apps = await load.loadApplicationsForProgram(idA(), programId);
+    expect(apps.map((a) => a.id)).toContain(appId);
+
+    const detail = await load.loadApplicationDetail(idA(), appId);
+    expect(detail!.application.programId).toBe(programId);
+    expect(detail!.application.programName).toBe("Security Competency");
+  });
+
+  it("offers adopted programs as link options", async () => {
+    const opts = await load.loadAdoptedProgramOptions(idA());
+    expect(opts.map((o) => o.id)).toContain(programId);
+    expect(opts.map((o) => o.name)).toContain("Security Competency");
+  });
+
+  it("unlinks when programId is cleared", async () => {
+    await run("application:update", "unlink-prog", (ctx) =>
+      ops.updateApplicationOp(ctx, { applicationId: appId, programId: null }),
+    );
+    const apps = await load.loadApplicationsForProgram(idA(), programId);
+    expect(apps.map((a) => a.id)).not.toContain(appId);
+    const detail = await load.loadApplicationDetail(idA(), appId);
+    expect(detail!.application.programId).toBeNull();
+  });
+
+  it("backfills program_id by matching competency name (migration 0033)", async () => {
+    const { withSystem, withTenant } = db.client;
+    const { competencyApplications } = db.schema;
+    const [fresh] = await withSystem((tx) =>
+      tx
+        .insert(competencyApplications)
+        .values({ tenantId: tenantA, name: "Backfill me", competency: "Security Competency", controlCount: 0 })
+        .returning({ id: competencyApplications.id }),
+    );
+    // Re-run the migration's backfill statement against the now-seeded data.
+    await withSystem((tx) =>
+      tx.execute(sql`
+        UPDATE competency_applications ca SET program_id = p.id
+        FROM programs p
+        WHERE p.tenant_id = ca.tenant_id AND ca.competency = p.name AND ca.program_id IS NULL
+      `),
+    );
+    const [row] = await withTenant(idA(), (tx) =>
+      tx
+        .select({ programId: competencyApplications.programId })
+        .from(competencyApplications)
+        .where(eq(competencyApplications.id, fresh!.id)),
+    );
+    expect(row!.programId).toBe(programId);
+  });
+
+  it("isolates program-linked applications by tenant (RLS)", async () => {
+    // Re-link the original app, then confirm tenant B sees nothing for this program.
+    await run("application:update", "relink-prog", (ctx) =>
+      ops.updateApplicationOp(ctx, { applicationId: appId, programId }),
+    );
+    const apps = await load.loadApplicationsForProgram(idB(), programId);
+    expect(apps).toHaveLength(0);
   });
 });

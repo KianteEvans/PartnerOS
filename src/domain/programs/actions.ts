@@ -107,7 +107,7 @@ export async function pursueProgram(
     return failure(err);
   }
   revalidatePath("/programs");
-  revalidatePath("/evidence/fit");
+  revalidatePath("/programs/evidence/fit");
   redirect(`/programs/${newId}`);
 }
 
@@ -221,7 +221,7 @@ export async function createRequirementTask(
     return failure(err);
   }
   if (programId) revalidatePath(`/programs/${programId}`);
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 
@@ -247,7 +247,7 @@ export async function stageRequirementEvidence(
     return failure(err);
   }
   if (programId) revalidatePath(`/programs/${programId}`);
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 

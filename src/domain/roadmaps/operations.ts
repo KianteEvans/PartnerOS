@@ -1,8 +1,9 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   roadmaps,
   roadmapMilestones,
   assessmentRecommendations,
+  assessmentModules,
   programs,
   tierPlans,
   tenants,
@@ -12,6 +13,8 @@ import {
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
 import { createSourcedTask } from "@/domain/tasks/operations";
+import { GAP_THRESHOLD } from "@/domain/assessments/scoring";
+import { MODULE_LABELS, type ModuleId } from "@/domain/assessments/catalog";
 import {
   planRoadmap,
   type HorizonId,
@@ -106,27 +109,47 @@ export async function createRoadmapOp(
   let sourceRef: string | null = null;
 
   if (input.sourceAssessmentId) {
-    const recs = await tx
-      .select({
-        title: assessmentRecommendations.title,
-        detail: assessmentRecommendations.detail,
-      })
-      .from(assessmentRecommendations)
+    // Primary: one ownable milestone per GAP module (score below the threshold),
+    // worst-first — a roadmap of the workstreams that move readiness, not a copy of
+    // every recommendation row.
+    const gaps = await tx
+      .select({ module: assessmentModules.module, score: assessmentModules.score })
+      .from(assessmentModules)
       .where(
         and(
-          eq(assessmentRecommendations.assessmentId, input.sourceAssessmentId),
-          eq(assessmentRecommendations.tenantId, identity.tenantId),
+          eq(assessmentModules.assessmentId, input.sourceAssessmentId),
+          eq(assessmentModules.tenantId, identity.tenantId),
+          lt(assessmentModules.score, GAP_THRESHOLD),
         ),
       )
-      .orderBy(asc(assessmentRecommendations.createdAt));
-    if (recs.length === 0) {
-      // Either the assessment doesn't exist for this tenant, or it has no
-      // recommendations yet (not scored). Either way there's nothing to seed.
-      throw new ValidationError(
-        "That assessment has no recommendations to build from yet",
-      );
+      .orderBy(asc(assessmentModules.score));
+
+    if (gaps.length > 0) {
+      seeds = gaps.map((g) => ({
+        title: `Reach 75+ in ${MODULE_LABELS[g.module as ModuleId]}`,
+        detail: `Scored ${g.score ?? 0}/100 — bring this module to the 75 strength threshold.`,
+      }));
+    } else {
+      // No gaps (a strong assessment): fall back to its recommendations so the
+      // program/milestone advice can still seed a plan.
+      const recs = await tx
+        .select({ title: assessmentRecommendations.title, detail: assessmentRecommendations.detail })
+        .from(assessmentRecommendations)
+        .where(
+          and(
+            eq(assessmentRecommendations.assessmentId, input.sourceAssessmentId),
+            eq(assessmentRecommendations.tenantId, identity.tenantId),
+          ),
+        )
+        .orderBy(asc(assessmentRecommendations.createdAt));
+      if (recs.length === 0) {
+        // Unknown/foreign assessment, or not scored yet — nothing to seed.
+        throw new ValidationError(
+          "That assessment has no gaps or recommendations to build from yet",
+        );
+      }
+      seeds = recs.map((r) => ({ title: r.title, detail: r.detail }));
     }
-    seeds = recs.map((r) => ({ title: r.title, detail: r.detail }));
     source = "assessment";
     sourceRef = input.sourceAssessmentId;
   }

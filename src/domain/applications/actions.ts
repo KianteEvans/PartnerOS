@@ -9,11 +9,14 @@ import { parseWorkbook } from "@/domain/applications/workbook";
 import {
   createApplicationFromUploadOp,
   updateControlOp,
+  bulkUpdateControlsOp,
   updateApplicationOp,
   markExportedOp,
   type UpdateControlInput,
+  type BulkUpdateControlsInput,
   type UpdateApplicationInput,
 } from "@/domain/applications/operations";
+import { parseBulkIds } from "@/domain/bulk";
 import { MAX_WORKBOOK_BYTES, isMet } from "@/domain/applications/schemas";
 import { isAwsStatus } from "@/domain/applications/packet";
 
@@ -72,8 +75,8 @@ export async function createApplication(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/applications");
-  redirect(`/applications/${newId}`);
+  revalidatePath("/programs/applications");
+  redirect(`/programs/applications/${newId}`);
 }
 
 /** Review/accept one control: save the (possibly edited) response + Met?, mark accepted. */
@@ -107,7 +110,45 @@ export async function updateControl(
   } catch (err) {
     return failure(err);
   }
-  if (applicationId) revalidatePath(`/applications/${applicationId}`);
+  if (applicationId) revalidatePath(`/programs/applications/${applicationId}`);
+  return { ok: true };
+}
+
+const CONTROL_STATUSES = ["open", "generated", "accepted", "edited"] as const;
+function isControlStatus(s: string): s is (typeof CONTROL_STATUSES)[number] {
+  return (CONTROL_STATUSES as readonly string[]).includes(s);
+}
+
+/** Apply a status and/or Met? to all selected controls at once. */
+export async function bulkUpdateControls(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const applicationId = String(formData.get("applicationId") ?? "");
+  try {
+    if (!applicationId) throw new ValidationError("Missing application");
+    const ids = parseBulkIds(formData.get("ids"));
+    const statusRaw = formData.has("status") ? String(formData.get("status")) : "";
+    const metRaw = formData.has("met") ? String(formData.get("met")) : "";
+    const input: BulkUpdateControlsInput = {
+      applicationId,
+      ids,
+      ...(isControlStatus(statusRaw) ? { status: statusRaw } : {}),
+      ...(isMet(metRaw) ? { met: metRaw } : {}),
+    };
+    await runMutation({
+      permission: "application:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "application.bulk_update_controls",
+      resourceType: "application_control",
+      auditMetadata: { count: ids.length, applicationId },
+      handler: (ctx) => bulkUpdateControlsOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  if (applicationId) revalidatePath(`/programs/applications/${applicationId}`);
   return { ok: true };
 }
 
@@ -128,6 +169,10 @@ export async function updateApplication(
     const solutionId = formData.has("solutionId")
       ? String(formData.get("solutionId")).trim() || null
       : undefined;
+    // Same convention for the linked competency Program.
+    const programId = formData.has("programId")
+      ? String(formData.get("programId")).trim() || null
+      : undefined;
     const input: UpdateApplicationInput = {
       applicationId,
       ...(categories !== undefined ? { categories } : {}),
@@ -136,6 +181,7 @@ export async function updateApplication(
       ...(pocRole !== undefined ? { pocRole } : {}),
       ...(isAwsStatus(statusRaw) ? { awsStatus: statusRaw } : {}),
       ...(solutionId !== undefined ? { solutionId } : {}),
+      ...(programId !== undefined ? { programId } : {}),
     };
     await runMutation({
       permission: "application:update",
@@ -149,7 +195,7 @@ export async function updateApplication(
   } catch (err) {
     return failure(err);
   }
-  if (applicationId) revalidatePath(`/applications/${applicationId}`);
+  if (applicationId) revalidatePath(`/programs/applications/${applicationId}`);
   return { ok: true };
 }
 
@@ -172,6 +218,6 @@ export async function markExported(
   } catch (err) {
     return failure(err);
   }
-  if (applicationId) revalidatePath(`/applications/${applicationId}`);
+  if (applicationId) revalidatePath(`/programs/applications/${applicationId}`);
   return { ok: true };
 }

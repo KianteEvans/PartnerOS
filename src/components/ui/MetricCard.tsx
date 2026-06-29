@@ -20,9 +20,15 @@ const VALUE_COLOR: Record<Tone, string> = {
   info: "var(--info)",
 };
 
-const TINT: Record<"ok" | "danger", { bg: string; border: string }> = {
+// ok/danger keep their dedicated surface tokens; the rest derive a matching wash
+// via color-mix so any tone can emphasise a KPI card. neutral = no wash.
+const TINT: Record<Tone, { bg: string; border: string }> = {
+  neutral: { bg: "var(--panel)", border: "var(--border)" },
+  accent: { bg: "color-mix(in srgb, var(--accent) 8%, var(--panel))", border: "color-mix(in srgb, var(--accent) 24%, var(--border))" },
   ok: { bg: "var(--surface-tint-ok)", border: "color-mix(in srgb, var(--ok) 22%, var(--border))" },
+  warn: { bg: "color-mix(in srgb, var(--warn) 9%, var(--panel))", border: "color-mix(in srgb, var(--warn) 24%, var(--border))" },
   danger: { bg: "var(--surface-tint-danger)", border: "color-mix(in srgb, var(--danger) 22%, var(--border))" },
+  info: { bg: "color-mix(in srgb, var(--info) 8%, var(--panel))", border: "color-mix(in srgb, var(--info) 24%, var(--border))" },
 };
 
 export interface MetricTrend {
@@ -45,7 +51,7 @@ export function MetricCard({
   value: string;
   sub?: string | undefined;
   tone?: Tone | undefined;
-  tint?: "ok" | "danger" | undefined;
+  tint?: Tone | undefined;
   trend?: MetricTrend | undefined;
   style?: CSSProperties | undefined;
 }): ReactNode {

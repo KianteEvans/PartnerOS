@@ -8,10 +8,13 @@ import { programs, programRequirements, evidence } from "@/db/schema";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { LifecycleNav } from "@/app/programs/LifecycleNav";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
 import { BarChart } from "@/components/ui/BarChart";
 import { RingGauge } from "@/components/ui/RingGauge";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { SearchForm } from "@/components/ui/SearchForm";
@@ -23,6 +26,10 @@ import { loadProgramRoi } from "@/domain/programs/roi-load";
 import { roiRollup } from "@/domain/programs/roi";
 import { loadCompetencyRecommendations } from "@/domain/programs/recommend-load";
 import { RecommendNarrative } from "@/components/ui/RecommendNarrative";
+import { loadSolutions } from "@/domain/solutions/load";
+import { SolutionsView } from "@/app/programs/SolutionsView";
+import { PursuitTracker } from "@/app/programs/PursuitTracker";
+import { topPursued } from "@/domain/programs/pursue";
 import { FIT_BAND_LABELS, type FitBand } from "@/domain/evidence/fit";
 import { PROGRAM_LIBRARY, FUNDING_FIT_LABELS } from "@/domain/programs/library";
 import {
@@ -68,6 +75,9 @@ export default async function ProgramsPage({
   // live outside the PortfolioView union; branch on the raw string so gate.ts stays clean.
   const isRoi = viewParam === "roi";
   const isRecommended = viewParam === "recommended";
+  const isSolutions = viewParam === "solutions";
+  const solutionsLayout: "grid" | "timeline" =
+    (Array.isArray(sp.layout) ? sp.layout[0] : sp.layout) === "timeline" ? "timeline" : "grid";
   const view: PortfolioView = isView(viewParam) ? viewParam : "all";
   const list = parseListParams(sp, { sortable: [], defaultSort: "created" });
   const today = new Date().toISOString().slice(0, 10);
@@ -75,6 +85,7 @@ export default async function ProgramsPage({
   const roiItems = isRoi ? await loadProgramRoi(identity) : [];
   const rollup = roiRollup(roiItems.map((r) => ({ name: r.name, roi: r.roi })));
   const recView = isRecommended ? await loadCompetencyRecommendations(identity, today) : null;
+  const solutionItems = isSolutions ? await loadSolutions(identity, today) : [];
 
   const { progs, reqs } = await withTenant(identity, async (tx) => {
     const progs = await tx
@@ -101,10 +112,32 @@ export default async function ProgramsPage({
     statesByProgram.set(r.programId, arr);
   }
 
+  // The Pursue headline: the in-flight competencies closest to being earned.
+  const pursuit = topPursued(
+    progs.map((p) => ({
+      id: p.id,
+      name: p.name,
+      programType: p.programType,
+      status: p.status,
+      expirationDate: p.expirationDate,
+      states: statesByProgram.get(p.id) ?? [],
+    })),
+    today,
+  );
+
   const counts = portfolioCounts(
     progs.map((p) => ({ status: p.status, expirationDate: p.expirationDate })),
     today,
   );
+  // Portfolio readiness: requirements met across every adopted program.
+  let metSum = 0;
+  let totSum = 0;
+  for (const p of progs) {
+    const pr = requirementProgress(statesByProgram.get(p.id) ?? []);
+    metSum += pr.met;
+    totSum += pr.total;
+  }
+  const avgReadiness = totSum > 0 ? Math.round((metSum / totSum) * 100) : 0;
   const adoptedKeys = new Set(progs.map((p) => p.libraryKey));
   const available = PROGRAM_LIBRARY.filter((p) => !adoptedKeys.has(p.key));
   const visible = filterPrograms(progs, view, today);
@@ -122,11 +155,28 @@ export default async function ProgramsPage({
   return (
     <PageShell>
       <PageHeader title="Program Management" />
+      <LifecycleNav />
+
+      {!isRoi && !isRecommended && !isSolutions && (
+        <MetricStrip min={140}>
+          <MetricCard label="Active" value={String(counts.active)} tone={counts.active > 0 ? "ok" : "neutral"} />
+          <MetricCard label="In progress" value={String(counts.pending)} tone={counts.pending > 0 ? "warn" : "neutral"} />
+          <MetricCard
+            label="Expiring soon"
+            value={String(counts.expiring)}
+            tone={counts.expiring > 0 ? "danger" : "neutral"}
+            {...(counts.expiring > 0 ? { tint: "danger" as const } : {})}
+          />
+          <MetricCard label="Avg readiness" value={`${avgReadiness}%`} />
+        </MetricStrip>
+      )}
+
+      {!isRoi && !isRecommended && !isSolutions && <PursuitTracker items={pursuit} />}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {PORTFOLIO_VIEWS.map((v) => {
-            const active = !isRoi && !isRecommended && v === view;
+            const active = !isRoi && !isRecommended && !isSolutions && v === view;
             const count = v === "available" ? available.length : counts[v];
             return (
               <Link
@@ -179,13 +229,31 @@ export default async function ProgramsPage({
           >
             ROI
           </Link>
+          <Link
+            key="solutions"
+            href={listHref("/programs", { view: "solutions" })}
+            style={{
+              padding: "6px 12px",
+              borderRadius: 999,
+              fontSize: 13,
+              textDecoration: "none",
+              border: "1px solid var(--border)",
+              background: isSolutions ? "var(--accent)" : "transparent",
+              color: isSolutions ? "var(--accent-ink)" : "var(--muted)",
+              fontWeight: isSolutions ? 600 : 400,
+            }}
+          >
+            Solutions
+          </Link>
         </nav>
-        {!isRoi && !isRecommended && <SearchForm q={list.q} placeholder="Search by name…" hidden={{ view }} />}
+        {!isRoi && !isRecommended && !isSolutions && <SearchForm q={list.q} placeholder="Search by name…" hidden={{ view }} />}
       </div>
 
-      {!isRoi && !isRecommended && <SavedViewsBar listKey="programs" current={{ view, q: list.q }} />}
+      {!isRoi && !isRecommended && !isSolutions && <SavedViewsBar listKey="programs" current={{ view, q: list.q }} />}
 
-      {isRecommended && recView ? (
+      {isSolutions ? (
+        <SolutionsView items={solutionItems} today={today} layout={solutionsLayout} />
+      ) : isRecommended && recView ? (
         <RecommendedView view={recView} />
       ) : isRoi ? (
         <RoiView roiItems={roiItems} rollup={rollup} />
@@ -260,7 +328,7 @@ export default async function ProgramsPage({
         </div>
       )}
 
-      {!isRoi && !isRecommended && (
+      {!isRoi && !isRecommended && !isSolutions && (
         <Pagination
           page={list.page}
           totalPages={totalPages}
@@ -307,7 +375,7 @@ function RecommendedView({
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
           Best-fit AWS Competencies, ranked by your evidence coverage, business model, and readiness.{" "}
-          <Link href="/evidence/fit" style={{ color: "var(--accent)" }}>
+          <Link href="/programs/evidence/fit" style={{ color: "var(--accent)" }}>
             Evidence-only view →
           </Link>
         </p>

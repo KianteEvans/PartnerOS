@@ -17,6 +17,7 @@ import {
   saveResponsesOp,
   submitAssessmentOp,
   reviewRecommendationOp,
+  approveAllRecommendationsOp,
 } from "@/domain/assessments/operations";
 
 /**
@@ -81,8 +82,8 @@ export async function createAssessment(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/assessments");
-  redirect(`/assessments/${newId}`);
+  revalidatePath("/plan");
+  redirect(`/plan/${newId}`);
 }
 
 export async function saveResponses(
@@ -107,7 +108,7 @@ export async function saveResponses(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/assessments/${formData.get("assessmentId")}`);
+  revalidatePath(`/plan/${formData.get("assessmentId")}`);
   return { ok: true };
 }
 
@@ -132,7 +133,7 @@ export async function submitAssessment(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/assessments/${assessmentId}`);
+  revalidatePath(`/plan/${assessmentId}`);
   return { ok: true };
 }
 
@@ -161,7 +162,7 @@ async function reviewRecommendation(
   } catch (err) {
     return failure(err);
   }
-  if (assessmentId) revalidatePath(`/assessments/${assessmentId}`);
+  if (assessmentId) revalidatePath(`/plan/${assessmentId}`);
   return { ok: true };
 }
 
@@ -177,4 +178,30 @@ export async function rejectRecommendation(
   formData: FormData,
 ): Promise<ActionState> {
   return reviewRecommendation(formData, "rejected");
+}
+
+/** Approve every still-pending recommendation on an assessment in one action. */
+export async function approveAllRecommendations(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  let assessmentId: string;
+  try {
+    ({ assessmentId } = parseOrThrow(submitAssessmentSchema, {
+      assessmentId: formData.get("assessmentId"),
+    }));
+    await runMutation({
+      permission: "assessment:approve",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ assessmentId }),
+      action: "recommendation.approve_all",
+      resourceType: "assessment",
+      resourceId: () => assessmentId,
+      handler: (ctx) => approveAllRecommendationsOp(ctx, { assessmentId }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath(`/plan/${assessmentId}`);
+  return { ok: true };
 }

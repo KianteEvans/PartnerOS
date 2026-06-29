@@ -263,6 +263,102 @@ export function coverageGaps(
   return out;
 }
 
+export interface PortfolioOpp extends SalesOrgOpp {
+  readonly stage: string;
+}
+
+export interface RepPortfolioStage {
+  readonly stage: string;
+  readonly count: number;
+  readonly openTCV: number;
+}
+
+export interface RepPortfolio {
+  readonly titles: readonly AwsOrgTitle[];
+  readonly accounts: readonly string[];
+  readonly openTCV: number;
+  readonly wonTCV: number;
+  /** OPEN opps grouped by stage, biggest pipeline first. */
+  readonly stages: readonly RepPortfolioStage[];
+}
+
+/** One AWS rep's book over the junction: their titles, the accounts they cover, and OPEN opps by stage. */
+export function repPortfolio(
+  repId: string,
+  edges: readonly TeamEdge[],
+  opps: readonly PortfolioOpp[],
+): RepPortfolio {
+  const oppById = new Map(opps.map((o) => [o.id, o]));
+  const titles = new Set<AwsOrgTitle>();
+  const oppIds = new Set<string>();
+  for (const e of edges) {
+    if (e.relationshipId !== repId) continue;
+    titles.add(e.title);
+    oppIds.add(e.opportunityId);
+  }
+  const accounts = new Set<string>();
+  let openTCV = 0;
+  let wonTCV = 0;
+  const byStage = new Map<string, { count: number; openTCV: number }>();
+  for (const id of oppIds) {
+    const o = oppById.get(id);
+    if (!o) continue;
+    if (o.accountName) accounts.add(o.accountName);
+    if (o.status === "open") {
+      openTCV += o.amount;
+      const g = byStage.get(o.stage) ?? { count: 0, openTCV: 0 };
+      g.count += 1;
+      g.openTCV += o.amount;
+      byStage.set(o.stage, g);
+    } else if (o.status === "won") {
+      wonTCV += o.amount;
+    }
+  }
+  return {
+    titles: [...titles].sort((a, b) => titlePriority(a) - titlePriority(b)),
+    accounts: [...accounts].sort(),
+    openTCV,
+    wonTCV,
+    stages: [...byStage.entries()].map(([stage, g]) => ({ stage, ...g })).sort((a, b) => b.openTCV - a.openTCV),
+  };
+}
+
+export interface RoleWinRate {
+  readonly title: AwsOrgTitle;
+  readonly won: number;
+  readonly lost: number;
+  /** won / (won + lost) as a percent, or null when no deals are decided yet. */
+  readonly winRate: number | null;
+}
+
+/** Per-AWS-title win rate over DECIDED deals (won + lost) the role was on. */
+export function roleWinRates(
+  edges: readonly TeamEdge[],
+  opps: readonly SalesOrgOpp[],
+): RoleWinRate[] {
+  const oppById = new Map(opps.map((o) => [o.id, o]));
+  const byTitle = new Map<AwsOrgTitle, Set<string>>();
+  for (const e of edges) {
+    const s = byTitle.get(e.title) ?? new Set<string>();
+    s.add(e.opportunityId);
+    byTitle.set(e.title, s);
+  }
+  const out: RoleWinRate[] = [];
+  for (const [title, oppIds] of byTitle) {
+    let won = 0;
+    let lost = 0;
+    for (const id of oppIds) {
+      const o = oppById.get(id);
+      if (!o) continue;
+      if (o.status === "won") won += 1;
+      else if (o.status === "lost") lost += 1;
+    }
+    const decided = won + lost;
+    out.push({ title, won, lost, winRate: decided > 0 ? Math.round((won / decided) * 100) : null });
+  }
+  return out.sort((a, b) => titlePriority(a.title) - titlePriority(b.title));
+}
+
 export interface SalesOrgSummary {
   readonly reps: number;
   readonly openTCV: number;

@@ -18,6 +18,7 @@ export interface SolutionListItem {
   readonly availability: string;
   readonly launchedCount: number;
   readonly band: RenewalBand;
+  readonly renewalDate: string | null;
 }
 
 export async function loadSolutions(identity: DbIdentity, today: string): Promise<SolutionListItem[]> {
@@ -73,6 +74,7 @@ export async function loadSolutions(identity: DbIdentity, today: string): Promis
         availability: r.availability,
         launchedCount,
         band: renewal.band,
+        renewalDate: r.renewalDate,
       };
     });
   });

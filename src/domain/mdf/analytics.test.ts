@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { allowedNext, canTransition, isOpen } from "@/domain/mdf/lifecycle";
+import { daysBetween } from "@/domain/dates";
 import {
   preflight,
   roiMultiple,
   committedAmount,
   deadlineRisk,
   portfolioSummary,
+  reimbursementRate,
+  claimedShare,
   type MdfLike,
 } from "@/domain/mdf/analytics";
 
@@ -92,5 +95,27 @@ describe("mdf finance", () => {
     expect(s.roi).toBe(4); // pipeline 60k / approved 15k
     expect(s.deadlineRisks).toBe(1);
     expect(s.openCount).toBe(2); // approved + claimed (rejected is closed)
+  });
+
+  it("reimbursementRate is reimbursed over approved (clamped); 0 when nothing approved", () => {
+    const s = portfolioSummary(
+      [req({ status: "reimbursed", approvedAmount: 10_000, deployedAmount: 10_000, claimedAmount: 10_000, reimbursedAmount: 6_000 })],
+      TODAY,
+    );
+    expect(reimbursementRate(s)).toBe(60);
+    expect(reimbursementRate(portfolioSummary([], TODAY))).toBe(0);
+  });
+
+  it("claimedShare is a request's claimed over approved", () => {
+    expect(claimedShare(req({ approvedAmount: 8_000, claimedAmount: 4_000 }))).toBe(50);
+    expect(claimedShare(req({ approvedAmount: null }))).toBe(0);
+  });
+});
+
+describe("daysBetween", () => {
+  it("counts whole signed days", () => {
+    expect(daysBetween("2026-06-01", "2026-06-08")).toBe(7);
+    expect(daysBetween("2026-06-08", "2026-06-01")).toBe(-7);
+    expect(daysBetween("2026-06-01", "2026-06-01")).toBe(0);
   });
 });

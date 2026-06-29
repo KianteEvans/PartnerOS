@@ -3,12 +3,13 @@ import type { ReactNode } from "react";
 import { Sora } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
-import { Brand } from "@/components/ui/Brand";
+import { MarketingNav } from "@/components/marketing/MarketingNav";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { TopBar } from "@/components/ui/TopBar";
 import { Footer } from "@/components/ui/Footer";
 import { Toaster } from "@/components/ui/Toaster";
 import { CommandPalette } from "@/components/ui/CommandPalette";
+import { SectionTheme } from "@/components/ui/SectionTheme";
 import { SessionKeepalive } from "@/components/ui/SessionKeepalive";
 import { tryGetServerIdentity } from "@/auth/session";
 import { loadNotifications } from "@/domain/notifications/load";
@@ -53,7 +54,7 @@ export default async function RootLayout({
           nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var d=document.documentElement;if(localStorage.getItem('partneros:theme')==='dark'){d.setAttribute('data-theme','dark');}if(localStorage.getItem('partneros:density')==='compact'){d.setAttribute('data-density','compact');}}catch(e){}})();",
+              "(function(){try{var d=document.documentElement;if(localStorage.getItem('partneros:theme')==='dark'){d.setAttribute('data-theme','dark');}if(localStorage.getItem('partneros:density')==='compact'){d.setAttribute('data-density','compact');}var p=(location.pathname.split('/')[1]||'');if({command:1,ace:1,mdf:1,programs:1,plan:1,reports:1}[p]){d.setAttribute('data-section',p);}}catch(e){}})();",
           }}
         />
         {identity ? (
@@ -69,21 +70,12 @@ export default async function RootLayout({
               <Footer year={year} />
             </div>
             <CommandPalette />
+            <SectionTheme />
             <SessionKeepalive />
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-            <header
-              style={{
-                display: "flex",
-                alignItems: "center",
-                padding: "10px 24px",
-                borderBottom: "1px solid var(--border)",
-                background: "var(--panel)",
-              }}
-            >
-              <Brand />
-            </header>
+            <MarketingNav />
             <div style={{ flex: 1 }}>{children}</div>
             <Footer year={year} />
           </div>

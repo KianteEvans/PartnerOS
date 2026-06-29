@@ -35,6 +35,7 @@ export function BarChart({
     <div style={{ display: "grid", gap: 10 }}>
       {data.map((d) => {
         const pct = peak <= 0 ? 0 : Math.max(0, Math.min(1, d.value / peak)) * 100;
+        const barColor = d.color ?? color;
         return (
           <div
             key={d.label}
@@ -49,10 +50,11 @@ export function BarChart({
             <span style={{ color: "var(--muted)" }}>{d.label}</span>
             <div style={{ height: 10, background: "var(--border)", borderRadius: 999, overflow: "hidden" }}>
               <div
+                className="pos-bar-fill"
                 style={{
                   width: `${pct}%`,
                   height: "100%",
-                  background: d.color ?? color,
+                  background: `linear-gradient(90deg, ${barColor}, color-mix(in srgb, ${barColor} 55%, #fff))`,
                   borderRadius: 999,
                   transition: "width 0.3s ease",
                 }}

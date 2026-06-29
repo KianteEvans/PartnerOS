@@ -58,7 +58,7 @@ export async function createTask(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 
@@ -111,7 +111,7 @@ export async function updateTask(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 
@@ -135,7 +135,7 @@ export async function completeTask(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 
@@ -186,6 +186,6 @@ export async function bulkUpdateTasks(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }

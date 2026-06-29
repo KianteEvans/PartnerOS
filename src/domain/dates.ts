@@ -17,3 +17,10 @@ export function addMonths(iso: string, n: number): string {
   d.setUTCMonth(d.getUTCMonth() + n);
   return d.toISOString().slice(0, 10);
 }
+
+/** Whole days from `from` to `to` (negative if `to` precedes `from`). */
+export function daysBetween(from: string, to: string): number {
+  const a = new Date(`${from}T00:00:00Z`).getTime();
+  const b = new Date(`${to}T00:00:00Z`).getTime();
+  return Math.round((b - a) / 86_400_000);
+}

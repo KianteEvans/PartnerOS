@@ -57,6 +57,8 @@ function buildAnswers(map: Record<string, string>) {
 
 let assessmentId = "";
 let programRecId = "";
+let bulkId = "";
+let pendingBefore = 0;
 
 beforeAll(async () => {
   db = await setupTestDb();
@@ -386,5 +388,94 @@ describe("assessments end-to-end", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe("bulk recommendation approval", () => {
+  it("stages multiple pending recommendations on a weak assessment", async () => {
+    // A fresh assessment submitted with NO answers scores low across every module,
+    // so the generator stages several gap recommendations — the bulk scenario.
+    const created = await gate.runMutation(
+      {
+        permission: "assessment:create",
+        idempotencyKey: "create-bulk",
+        rawBody: "{}",
+        action: "assessment.create",
+        resourceType: "assessment",
+        resourceId: (r: { id: string }) => r.id,
+        handler: (ctx) =>
+          ops.createAssessmentOp(ctx, {
+            name: "Weak readiness",
+            preset: "program_submission",
+            targetProgram: "Migration Competency",
+          }),
+      },
+      { resolveIdentity: async () => identity(tenantA, ownerA) },
+    );
+    bulkId = created.body.id;
+
+    const res = await gate.runMutation(
+      {
+        permission: "assessment:submit",
+        idempotencyKey: `submit:${bulkId}`,
+        rawBody: JSON.stringify({ assessmentId: bulkId }),
+        action: "assessment.submit",
+        resourceType: "assessment",
+        resourceId: () => bulkId,
+        handler: (ctx) => ops.submitAssessmentOp(ctx, { assessmentId: bulkId }),
+      },
+      { resolveIdentity: async () => identity(tenantA, ownerA) },
+    );
+    pendingBefore = res.body.recs;
+    expect(pendingBefore).toBeGreaterThan(1); // genuinely a batch
+  });
+
+  it("approves every pending rec in one transaction, firing each task handoff", async () => {
+    const { withTenant } = db.client;
+    const { tasks, assessmentRecommendations } = db.schema;
+    const tasksBefore = (
+      await withTenant(identity(tenantA, ownerA), (tx) => tx.select({ id: tasks.id }).from(tasks))
+    ).length;
+
+    const res = await gate.runMutation(
+      {
+        permission: "assessment:approve",
+        idempotencyKey: "approve-all-bulk",
+        rawBody: JSON.stringify({ assessmentId: bulkId }),
+        action: "recommendation.approve_all",
+        resourceType: "assessment",
+        resourceId: () => bulkId,
+        handler: (ctx) => ops.approveAllRecommendationsOp(ctx, { assessmentId: bulkId }),
+      },
+      { resolveIdentity: async () => identity(tenantA, ownerA) },
+    );
+    expect(res.body.approved).toBe(pendingBefore);
+
+    const recs = await withTenant(identity(tenantA, ownerA), (tx) =>
+      tx.select().from(assessmentRecommendations).where(eq(assessmentRecommendations.assessmentId, bulkId)),
+    );
+    expect(recs.every((r) => r.status === "approved")).toBe(true);
+
+    // Each approved recommendation spawned exactly one task (the handoff fired per row).
+    const tasksAfter = (
+      await withTenant(identity(tenantA, ownerA), (tx) => tx.select({ id: tasks.id }).from(tasks))
+    ).length;
+    expect(tasksAfter - tasksBefore).toBe(pendingBefore);
+  });
+
+  it("re-running approve-all finds nothing pending (safe no-op)", async () => {
+    const res = await gate.runMutation(
+      {
+        permission: "assessment:approve",
+        idempotencyKey: "approve-all-bulk-2",
+        rawBody: JSON.stringify({ assessmentId: bulkId }),
+        action: "recommendation.approve_all",
+        resourceType: "assessment",
+        resourceId: () => bulkId,
+        handler: (ctx) => ops.approveAllRecommendationsOp(ctx, { assessmentId: bulkId }),
+      },
+      { resolveIdentity: async () => identity(tenantA, ownerA) },
+    );
+    expect(res.body.approved).toBe(0);
   });
 });

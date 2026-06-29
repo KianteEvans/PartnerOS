@@ -9,6 +9,7 @@ import {
   caseStudies,
   applicationCaseStudies,
   solutions,
+  programs,
 } from "@/db/schema";
 import type { FillTarget } from "@/domain/applications/grid";
 import type { MetSuggestion } from "@/domain/applications/schemas";
@@ -52,6 +53,36 @@ export async function loadApplications(identity: DbIdentity): Promise<Applicatio
   );
 }
 
+/** Applications linked to a specific adopted program (the program detail "Submit" panel). */
+export async function loadApplicationsForProgram(
+  identity: DbIdentity,
+  programId: string,
+): Promise<ApplicationListItem[]> {
+  return withTenant(identity, (tx) =>
+    tx
+      .select({
+        id: competencyApplications.id,
+        name: competencyApplications.name,
+        competency: competencyApplications.competency,
+        programType: competencyApplications.programType,
+        status: competencyApplications.status,
+        controlCount: competencyApplications.controlCount,
+        acceptedCount: competencyApplications.acceptedCount,
+        awsStatus: competencyApplications.awsStatus,
+        sourceFileName: competencyApplications.sourceFileName,
+        createdAt: competencyApplications.createdAt,
+      })
+      .from(competencyApplications)
+      .where(
+        and(
+          eq(competencyApplications.tenantId, identity.tenantId),
+          eq(competencyApplications.programId, programId),
+        ),
+      )
+      .orderBy(desc(competencyApplications.createdAt)),
+  );
+}
+
 export interface ControlRow {
   readonly id: string;
   readonly sheetName: string;
@@ -89,6 +120,8 @@ export interface ApplicationDetail {
     readonly confirmedAt: Date | null;
     readonly solutionId: string | null;
     readonly solutionTitle: string | null;
+    readonly programId: string | null;
+    readonly programName: string | null;
   };
   readonly controls: readonly ControlRow[];
   readonly currentTier: TierId;
@@ -124,9 +157,12 @@ export async function loadApplicationDetail(
         sourceFileName: competencyApplications.sourceFileName,
         solutionId: competencyApplications.solutionId,
         solutionTitle: solutions.title,
+        programId: competencyApplications.programId,
+        programName: programs.name,
       })
       .from(competencyApplications)
       .leftJoin(solutions, eq(solutions.id, competencyApplications.solutionId))
+      .leftJoin(programs, eq(programs.id, competencyApplications.programId))
       .where(
         and(
           eq(competencyApplications.id, id),
@@ -218,4 +254,20 @@ export async function loadApplicationDetail(
       attachedCaseStudies: attached,
     };
   });
+}
+
+export interface ProgramOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** Adopted programs offered as link targets in the application packet editor. */
+export async function loadAdoptedProgramOptions(identity: DbIdentity): Promise<ProgramOption[]> {
+  return withTenant(identity, (tx) =>
+    tx
+      .select({ id: programs.id, name: programs.name })
+      .from(programs)
+      .where(eq(programs.tenantId, identity.tenantId))
+      .orderBy(asc(programs.name)),
+  );
 }

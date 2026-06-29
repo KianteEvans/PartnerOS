@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
-import { opportunities, aceRelationships, aceInteractions, users, partnerCentralOpportunities, awsConnection, solutions, opportunityAwsTeam, programs } from "@/db/schema";
+import { opportunities, aceRelationships, aceInteractions, users, partnerCentralOpportunities, awsConnection, solutions, opportunityAwsTeam, programs, aceGoals } from "@/db/schema";
 import { addDays } from "@/domain/dates";
 import { can } from "@/authz/permissions";
 import { Panel } from "@/components/ui/Panel";
@@ -55,6 +55,8 @@ import { coverageByAccount, ROLE_LABELS } from "@/domain/ace/relationships";
 import {
   computeRepHealth,
   repHealthSummary,
+  reEngageQueue,
+  interactionTimeline,
   HEALTH_BAND_LABELS,
   type HealthBand,
 } from "@/domain/ace/rep-intelligence";
@@ -65,11 +67,17 @@ import {
   rollupByAccount,
   coverageGaps,
   salesOrgSummary,
+  repPortfolio,
+  roleWinRates,
   AWS_ORG_TITLE_LABELS,
   type RepRollup,
   type SalesOrgOpp,
+  type PortfolioOpp,
   type TeamEdge,
 } from "@/domain/ace/sales-org";
+import { measureGoal, type GoalOpp } from "@/domain/ace-goals/catalog";
+import { syncGoalSnapshots } from "@/domain/ace-goals/load";
+import { CoSellingGoals } from "@/app/ace/CoSellingGoals";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -122,7 +130,7 @@ export default async function AcePage({
   const list = parseListParams(sp, { sortable: [], defaultSort: "created" });
   const today = new Date().toISOString().slice(0, 10);
 
-  const { opps, rels, members, synced, awsConn, interactions, sols, team, progs } = await withTenant(identity, async (tx) => {
+  const { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals } = await withTenant(identity, async (tx) => {
     const opps = await tx.select().from(opportunities).where(eq(opportunities.tenantId, identity.tenantId)).orderBy(desc(opportunities.createdAt));
     const rels = await tx.select().from(aceRelationships).where(eq(aceRelationships.tenantId, identity.tenantId)).orderBy(desc(aceRelationships.createdAt));
     const members = await tx.select({ id: users.id, email: users.email }).from(users).where(eq(users.tenantId, identity.tenantId));
@@ -153,7 +161,12 @@ export default async function AcePage({
       })
       .from(opportunityAwsTeam)
       .where(eq(opportunityAwsTeam.tenantId, identity.tenantId));
-    return { opps, rels, members, synced, awsConn, interactions, sols, team, progs };
+    const goals = await tx
+      .select()
+      .from(aceGoals)
+      .where(eq(aceGoals.tenantId, identity.tenantId))
+      .orderBy(desc(aceGoals.createdAt));
+    return { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals };
   });
 
   const emailById = new Map(members.map((m) => [m.id, m.email]));
@@ -194,6 +207,25 @@ export default async function AcePage({
   const wr = winRate(opps as OppLike[]);
   const funnel = stageFunnel(opps as OppLike[]);
   const coolingReps = repRoll.filter((r) => r.atRisk).length;
+
+  // Co-Selling Goals: measure each active goal against the rows already loaded,
+  // then materialize today's snapshot (best-effort) to feed the trend sparkline.
+  const canManageGoals = can(identity.role, "ace_goal:create");
+  const activeGoals = goals.filter((g) => g.status === "active");
+  const goalData = {
+    opps: opps.map((o) => ({ ...o, createdAt: o.createdAt.toISOString().slice(0, 10) })) as GoalOpp[],
+    rels: rels.map((r) => ({ createdAt: r.createdAt.toISOString().slice(0, 10) })),
+    today,
+  };
+  const currentByGoalId = new Map(
+    activeGoals.map((g) => [g.id, measureGoal({ metricKey: g.metricKey, periodStart: g.periodStart }, goalData)]),
+  );
+  let goalTrends = new Map<string, number[]>();
+  try {
+    goalTrends = await syncGoalSnapshots(identity, currentByGoalId, today);
+  } catch {
+    goalTrends = new Map();
+  }
 
   const attention: { tone: Tone; title: string; detail: string; href: string }[] = [];
   const coolTop = [...repRoll].filter((r) => r.atRisk).sort((a, b) => b.openTCV - a.openTCV)[0];
@@ -312,6 +344,14 @@ export default async function AcePage({
         </Panel>
       )}
 
+      <CoSellingGoals
+        goals={activeGoals}
+        currentByGoalId={currentByGoalId}
+        trendsByGoalId={goalTrends}
+        today={today}
+        canManage={canManageGoals}
+      />
+
       <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {TABS.map((t) => {
           const active = t.key === tab;
@@ -330,7 +370,7 @@ export default async function AcePage({
           <Opportunities opps={opps} rels={rels} view={view} today={today} members={members} emailById={emailById} canApprove={canApprove} list={list} sols={sols} progs={progs} />
         </>
       )}
-      {tab === "relationships" && <Relationships rels={rels} opps={opps} cadence={cadenceByContact} today={today} list={list} />}
+      {tab === "relationships" && <Relationships rels={rels} opps={opps} cadence={cadenceByContact} interactions={interactions} today={today} list={list} />}
       {tab === "reps" && (
         <Reps
           opps={opps}
@@ -637,7 +677,7 @@ function Opportunities({
                   {o.routingStatus === "approved" ? (
                     <span style={{ fontSize: 12, fontWeight: 600 }}>
                       <span style={{ color: "var(--accent)" }}>Routing approved</span>
-                      {o.taskId && <> · <Link href="/tasks" style={{ color: "var(--accent)" }}>follow-up task</Link></>}
+                      {o.taskId && <> · <Link href="/command/tasks" style={{ color: "var(--accent)" }}>follow-up task</Link></>}
                     </span>
                   ) : o.routingStatus === "routed" && canApprove ? (
                     <MutationForm action={approveRouting} submitLabel="Approve routing → task" variant="secondary" hidden={{ opportunityId: o.id }} />
@@ -664,16 +704,57 @@ function Opportunities({
   );
 }
 
+const KIND_COLOR: Record<string, string> = {
+  meeting: "var(--ok)",
+  qbr: "var(--accent-2)",
+  call: "var(--info)",
+  email: "var(--muted)",
+  note: "var(--border)",
+};
+
+/** A labelled 0–100 health-driver bar (recency / strength / momentum), colored by value. */
+function DriverBar({ label, value }: { label: string; value: number }): ReactNode {
+  const color = value >= 60 ? "var(--ok)" : value >= 35 ? "var(--warn)" : "var(--danger)";
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "64px 1fr 26px", gap: 8, alignItems: "center" }}>
+      <span style={{ fontSize: 11, color: "var(--muted)" }}>{label}</span>
+      <div style={{ height: 5, background: "var(--border)", borderRadius: 999 }}>
+        <div style={{ width: `${Math.max(0, Math.min(100, value))}%`, height: "100%", background: color, borderRadius: 999 }} />
+      </div>
+      <span style={{ fontSize: 11, color: "var(--muted)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+    </div>
+  );
+}
+
+/** A compact touch-rhythm strip: one kind-colored dot per recent interaction, newest dated. */
+function TouchTimeline({ touches }: { touches: readonly { occurredOn: string; kind: string }[] }): ReactNode {
+  if (touches.length === 0) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
+      {touches.map((t, i) => (
+        <span
+          key={i}
+          title={`${KIND_LABELS[t.kind as keyof typeof KIND_LABELS]} · ${t.occurredOn}`}
+          style={{ width: 8, height: 8, borderRadius: "50%", background: KIND_COLOR[t.kind] ?? "var(--muted)", flexShrink: 0 }}
+        />
+      ))}
+      <span style={{ fontSize: 10.5, color: "var(--muted)", marginLeft: 2 }}>last {touches[touches.length - 1]!.occurredOn}</span>
+    </div>
+  );
+}
+
 function Relationships({
   rels,
   opps,
   cadence,
+  interactions,
   today,
   list,
 }: {
   rels: (typeof aceRelationships.$inferSelect)[];
   opps: (typeof opportunities.$inferSelect)[];
   cadence: Map<string, { count: number; lastOn: string; lastKind: string }>;
+  interactions: ReadonlyArray<{ contactId: string; occurredOn: string; kind: string }>;
   today: string;
   list: ListParams;
 }): ReactNode {
@@ -683,6 +764,29 @@ function Relationships({
   const summary = repHealthSummary(healths);
   const relById = new Map(rels.map((r) => [r.id, r]));
   const coverage = coverageByAccount(rels);
+  const queue = reEngageQueue(healths);
+
+  const logTouch = (r: typeof aceRelationships.$inferSelect): ReactNode => (
+    <FormDrawer
+      triggerLabel="Log touch"
+      triggerVariant="secondary"
+      title={`Log touch — ${r.name}`}
+      action={logInteraction}
+      submitLabel="Log"
+      successMessage="Touchpoint logged."
+      submitVariant="secondary"
+      hidden={{ contactId: r.id }}
+    >
+      <label style={labelStyle}><span style={spanStyle}>Date</span><input name="occurredOn" type="date" defaultValue={today} style={controlStyle} /></label>
+      <label style={labelStyle}>
+        <span style={spanStyle}>Type</span>
+        <select name="kind" defaultValue="meeting" style={controlStyle}>
+          {Object.entries(KIND_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+      </label>
+      <label style={labelStyle}><span style={spanStyle}>Note</span><input name="note" maxLength={2000} style={controlStyle} /></label>
+    </FormDrawer>
+  );
 
   const searched = list.q
     ? healths.filter((h) => h.name.toLowerCase().includes(list.q.toLowerCase()))
@@ -693,6 +797,38 @@ function Relationships({
 
   return (
     <>
+      {queue.length > 0 && (
+        <Panel title={`Re-engage now (${queue.length})`}>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--muted)" }}>
+            Cooling relationships with open pipeline at stake — biggest first. Log a touch to re-warm them.
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {queue.map((h) => {
+              const r = relById.get(h.id);
+              return (
+                <Card
+                  key={h.id}
+                  compact
+                  style={{ borderLeft: "3px solid var(--danger)", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: 13.5 }}>{h.name}</strong>
+                      <Badge tone={HEALTH_TONE[h.band]}>{HEALTH_BAND_LABELS[h.band]}</Badge>
+                    </span>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                      {money(h.openValue)} at risk · last contact {h.daysSinceContact === null ? "never" : `${h.daysSinceContact}d ago`}
+                      {h.accountName ? ` · ${h.accountName}` : ""}
+                    </div>
+                  </div>
+                  {r && logTouch(r)}
+                </Card>
+              );
+            })}
+          </div>
+        </Panel>
+      )}
+
       {healths.length > 0 && (
         <Panel title="Relationship health">
           <BarChart
@@ -779,16 +915,24 @@ function Relationships({
                 <p style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0 0" }}>
                   {ROLE_LABELS[h.role]} · {h.accountName || "—"} · last contact {h.daysSinceContact === null ? "never" : `${h.daysSinceContact}d ago`}
                 </p>
-                <p style={{ color: "var(--muted)", fontSize: 12, margin: "2px 0 0" }}>
-                  Recency {h.recency} · Strength {h.strength} · Momentum {h.momentum}
-                  {h.openCount > 0 ? ` · ${h.openCount} open · ${money(h.openValue)} pipeline` : ""}
-                  {h.originated > 0 ? ` · ${h.originated} AWS-originated` : ""}
-                </p>
-                <p style={{ color: "var(--muted)", fontSize: 12, margin: "2px 0 0" }}>
+                <div style={{ display: "grid", gap: 4, margin: "8px 0 0", maxWidth: 380 }}>
+                  <DriverBar label="Recency" value={h.recency} />
+                  <DriverBar label="Strength" value={h.strength} />
+                  <DriverBar label="Momentum" value={h.momentum} />
+                </div>
+                {(h.openCount > 0 || h.originated > 0) && (
+                  <p style={{ color: "var(--muted)", fontSize: 12, margin: "8px 0 0" }}>
+                    {h.openCount > 0 ? `${h.openCount} open · ${money(h.openValue)} pipeline` : ""}
+                    {h.openCount > 0 && h.originated > 0 ? " · " : ""}
+                    {h.originated > 0 ? `${h.originated} AWS-originated` : ""}
+                  </p>
+                )}
+                <p style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0 0" }}>
                   {cad
                     ? `${cad.count} touch${cad.count === 1 ? "" : "es"} / 90d · last ${KIND_LABELS[cad.lastKind as keyof typeof KIND_LABELS]} ${cad.lastOn}`
                     : "No touchpoints logged"}
                 </p>
+                <TouchTimeline touches={interactionTimeline(interactions, h.id)} />
                 {h.atStake && (
                   <p style={{ color: "var(--danger)", fontSize: 12, margin: "6px 0 0" }}>
                     ⚠ {money(h.openValue)} pipeline at risk — relationship cooling
@@ -796,25 +940,7 @@ function Relationships({
                 )}
                 {r && (
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-                    <FormDrawer
-                      triggerLabel="Log touch"
-                      triggerVariant="secondary"
-                      title={`Log touch — ${r.name}`}
-                      action={logInteraction}
-                      submitLabel="Log"
-                      successMessage="Touchpoint logged."
-                      submitVariant="secondary"
-                      hidden={{ contactId: r.id }}
-                    >
-                      <label style={labelStyle}><span style={spanStyle}>Date</span><input name="occurredOn" type="date" defaultValue={today} style={controlStyle} /></label>
-                      <label style={labelStyle}>
-                        <span style={spanStyle}>Type</span>
-                        <select name="kind" defaultValue="meeting" style={controlStyle}>
-                          {Object.entries(KIND_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                        </select>
-                      </label>
-                      <label style={labelStyle}><span style={spanStyle}>Note</span><input name="note" maxLength={2000} style={controlStyle} /></label>
-                    </FormDrawer>
+                    {logTouch(r)}
                     <FormDrawer
                       triggerLabel="Edit"
                       triggerVariant="secondary"
@@ -911,9 +1037,14 @@ function Reps({
   const summary = salesOrgSummary(teamOpps, rollups, gaps);
   const noSalesRep = gaps.filter((g) => g.missingSalesRep).length;
   const noPsm = gaps.filter((g) => g.missingPsm).length;
+  // Stage-aware team opps (for per-rep drill-down) + a full-opp lookup (for gap remediation).
+  const teamOppsStaged: PortfolioOpp[] = opps
+    .filter((o) => teamOppIds.has(o.id))
+    .map((o) => ({ id: o.id, accountName: o.accountName, status: o.status, amount: o.amount, stage: o.stage }));
+  const oppById = new Map(opps.map((o) => [o.id, o]));
+  const winByTitle = new Map(roleWinRates(team, teamOpps).map((w) => [w.title, w] as const));
 
   const activeSort = rsort && REP_SORT_KEYS.has(rsort) ? rsort : "priority";
-  const sortState = { sort: activeSort, dir: "desc" as const, href: (k: string) => `/ace?tab=reps&rsort=${k}` };
   const sorted = sortRollups(rollups, activeSort);
 
   const internal = repWorkload(opps as OppLike[]);
@@ -980,50 +1111,102 @@ function Reps({
             max={roleMax}
           />
         )}
+        {roles.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <Table
+              rows={roles}
+              rowKey={(r) => r.title}
+              columns={[
+                { key: "role", header: "Role", render: (r) => <Badge>{AWS_ORG_TITLE_LABELS[r.title]}</Badge> },
+                { key: "reps", header: "Reps", align: "right", render: (r) => String(r.reps) },
+                { key: "open", header: "Open pipeline", align: "right", render: (r) => money(r.openTCV) },
+                { key: "won", header: "Closed-won", align: "right", render: (r) => money(r.closedWonTCV) },
+                {
+                  key: "wr",
+                  header: "Win rate",
+                  align: "right",
+                  render: (r) => {
+                    const w = winByTitle.get(r.title);
+                    return w && w.winRate !== null ? `${w.winRate}% (${w.won}/${w.won + w.lost})` : "—";
+                  },
+                },
+              ]}
+            />
+          </div>
+        )}
       </Panel>
 
       <Panel title={`AWS reps (${rollups.length})`}>
-        <Table
-          rows={sorted}
-          rowKey={(r) => r.id}
-          sort={sortState}
-          rowStyle={(r) => (r.atRisk ? { background: "color-mix(in srgb, var(--warn) 9%, transparent)" } : undefined)}
-          empty="No AWS reps linked yet."
-          columns={[
-            {
-              key: "rep",
-              header: "AWS rep",
-              render: (r) => (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 9 }}>
-                  <Avatar name={r.name} />
-                  <span>
-                    {r.atRisk ? <span title="Open pipeline on a cooling relationship" style={{ color: "var(--warn)" }}>⚠ </span> : null}
-                    <strong>{r.name}</strong>
-                    {r.email ? <span style={{ color: "var(--muted)", fontSize: 12 }}> · {r.email}</span> : null}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 10, fontSize: 12 }}>
+          <span style={{ color: "var(--muted)" }}>Sort:</span>
+          {([["priority", "Priority"], ["open", "Open opps"], ["tcv", "Pipeline"], ["won", "Won"], ["last", "Last contact"]] as const).map(([k, lbl]) => {
+            const active = activeSort === k;
+            return (
+              <Link
+                key={k}
+                href={`/ace?tab=reps&rsort=${k}`}
+                style={{ padding: "3px 10px", borderRadius: 999, textDecoration: "none", border: "1px solid var(--border)", background: active ? "var(--accent)" : "transparent", color: active ? "var(--accent-ink)" : "var(--muted)", fontWeight: active ? 600 : 400 }}
+              >
+                {lbl}
+              </Link>
+            );
+          })}
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {sorted.map((r) => {
+            const pf = repPortfolio(r.id, team, teamOppsStaged);
+            return (
+              <details
+                key={r.id}
+                style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: r.atRisk ? "color-mix(in srgb, var(--warn) 9%, transparent)" : "var(--panel)" }}
+              >
+                <summary style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 9, flex: "1 1 200px", minWidth: 0 }}>
+                    <Avatar name={r.name} />
+                    <span style={{ minWidth: 0 }}>
+                      {r.atRisk ? <span title="Open pipeline on a cooling relationship" style={{ color: "var(--warn)" }}>⚠ </span> : null}
+                      <strong>{r.name}</strong>
+                      {r.email ? <span style={{ color: "var(--muted)", fontSize: 12 }}> · {r.email}</span> : null}
+                    </span>
                   </span>
-                </span>
-              ),
-            },
-            { key: "title", header: "Role", render: (r) => <Badge>{AWS_ORG_TITLE_LABELS[r.primaryTitle]}</Badge> },
-            { key: "accounts", header: "Accounts", render: (r) => r.accounts.join(", ") || "—" },
-            { key: "open", header: "Open opps", align: "right", sortKey: "open", render: (r) => String(r.openCount) },
-            { key: "openTCV", header: "Open pipeline", align: "right", sortKey: "tcv", render: (r) => money(r.openTCV) },
-            { key: "wonTCV", header: "Closed-won TCV", align: "right", sortKey: "won", render: (r) => money(r.closedWonTCV) },
-            {
-              key: "last",
-              header: "Last contact",
-              align: "right",
-              sortKey: "last",
-              render: (r) => (r.daysSinceContact === null ? "never" : `${r.daysSinceContact}d`),
-            },
-            {
-              key: "health",
-              header: "Health",
-              render: (r) =>
-                r.band ? <Badge tone={HEALTH_TONE[r.band]}>{HEALTH_BAND_LABELS[r.band]}</Badge> : <Badge>—</Badge>,
-            },
-          ]}
-        />
+                  <Badge>{AWS_ORG_TITLE_LABELS[r.primaryTitle]}</Badge>
+                  <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>{r.openCount} open · {money(r.openTCV)}</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>won {money(r.closedWonTCV)}</span>
+                  <span style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>{r.daysSinceContact === null ? "never" : `${r.daysSinceContact}d`}</span>
+                  {r.band ? <Badge tone={HEALTH_TONE[r.band]}>{HEALTH_BAND_LABELS[r.band]}</Badge> : <Badge>—</Badge>}
+                </summary>
+                <div style={{ borderTop: "1px solid var(--border)", padding: "10px 12px", display: "grid", gap: 10, background: "var(--panel-2)" }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>Titles:</span>
+                    {pf.titles.map((t) => <Badge key={t}>{AWS_ORG_TITLE_LABELS[t]}</Badge>)}
+                  </div>
+                  <div style={{ fontSize: 12.5 }}>
+                    <span style={{ color: "var(--muted)" }}>Accounts: </span>
+                    {pf.accounts.length ? pf.accounts.join(", ") : "—"}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>Open opps by stage</div>
+                    {pf.stages.length === 0 ? (
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>No open opportunities.</span>
+                    ) : (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {pf.stages.map((s) => (
+                          <div key={s.stage} style={{ display: "grid", gridTemplateColumns: "minmax(110px, 160px) 1fr auto", gap: 10, alignItems: "center", fontSize: 12.5 }}>
+                            <span>{STAGE_LABELS[s.stage as keyof typeof STAGE_LABELS] ?? s.stage}</span>
+                            <div style={{ height: 6, background: "var(--border)", borderRadius: 999 }}>
+                              <div style={{ width: `${pf.openTCV > 0 ? Math.round((s.openTCV / pf.openTCV) * 100) : 0}%`, height: "100%", background: "var(--accent-2)", borderRadius: 999 }} />
+                            </div>
+                            <strong style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{s.count} · {money(s.openTCV)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
       </Panel>
 
       <Panel title="Account coverage">
@@ -1048,6 +1231,42 @@ function Reps({
           ]}
         />
       </Panel>
+
+      {gaps.length > 0 && (
+        <Panel title={`Coverage gaps (${gaps.length})`}>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--muted)" }}>
+            Open deals missing an AWS Sales Rep or PSM — engage the sales org to get them covered.
+          </p>
+          <Table
+            rows={gaps}
+            rowKey={(g) => g.opportunityId}
+            empty="No coverage gaps."
+            columns={[
+              {
+                key: "deal",
+                header: "Opportunity",
+                render: (g) => (
+                  <Link href="/ace?tab=opportunities" style={{ color: "var(--accent)", textDecoration: "none" }}>
+                    {oppById.get(g.opportunityId)?.name || g.account}
+                  </Link>
+                ),
+              },
+              { key: "account", header: "Account", render: (g) => g.account },
+              { key: "amount", header: "Amount", align: "right", render: (g) => money(oppById.get(g.opportunityId)?.amount ?? 0) },
+              {
+                key: "missing",
+                header: "Missing",
+                render: (g) => (
+                  <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+                    {g.missingSalesRep && <Badge tone="warn">no Sales Rep</Badge>}
+                    {g.missingPsm && <Badge tone="warn">no PSM</Badge>}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Panel>
+      )}
 
       {internalPanel}
     </div>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * Dependency-free donut gauge — a single value as a filled arc over a track ring,
@@ -37,6 +37,9 @@ export function RingGauge({
   const dash = pct * circumference;
   const center = size / 2;
   const display = label ?? String(Math.round(value));
+  // Derive a stable gradient id from the colour itself: equal colours share an
+  // (identical) gradient, different colours get distinct ids -> no SVG def clash.
+  const gid = `rg-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
 
   return (
     <svg
@@ -46,17 +49,26 @@ export function RingGauge({
       role="img"
       aria-label={`${display}${caption ? ` (${caption})` : ""} of ${max}`}
     >
+      <defs>
+        <linearGradient id={gid} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style={{ stopColor: color }} />
+          <stop offset="100%" style={{ stopColor: `color-mix(in srgb, ${color} 55%, #fff)` }} />
+        </linearGradient>
+      </defs>
       <circle cx={center} cy={center} r={r} fill="none" stroke="var(--border)" strokeWidth={thickness} />
       <circle
         cx={center}
         cy={center}
         r={r}
         fill="none"
-        stroke={color}
+        stroke={`url(#${gid})`}
         strokeWidth={thickness}
         strokeLinecap="round"
-        strokeDasharray={`${dash} ${circumference}`}
+        strokeDasharray={circumference}
+        strokeDashoffset={circumference - dash}
         transform={`rotate(-90 ${center} ${center})`}
+        className="pos-ring-arc"
+        style={{ "--ring-circ": circumference } as CSSProperties}
       />
       <text
         x={center}

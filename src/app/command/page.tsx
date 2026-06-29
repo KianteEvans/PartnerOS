@@ -10,17 +10,25 @@ import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { BarChart } from "@/components/ui/BarChart";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { ActivityList } from "@/components/ui/ActivityList";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { CommandNav } from "@/app/command/CommandNav";
 import { loadCommandData } from "@/domain/command/load";
 import { buildCommandCenter } from "@/domain/command/aggregate";
+import { pipelineSummary } from "@/domain/ace/opportunities";
+import { portfolioSummary } from "@/domain/mdf/analytics";
 import {
   filterDecisions,
   DECISION_VIEWS,
   DECISION_VIEW_LABELS,
+  SITUATION_LABELS,
   type DecisionView,
   type Decision,
   type Severity,
+  type Situation,
 } from "@/domain/command/brief";
+import { daysBetween } from "@/domain/dates";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
   critical: "var(--danger)",
@@ -32,6 +40,26 @@ const BAND_COLOR: Record<string, string> = {
   fair: "var(--warn)",
   at_risk: "var(--danger)",
 };
+/** Health drivers drill through to the section that drives the score. */
+const DRIVER_LINK: Record<string, string> = {
+  Evidence: "/programs/evidence",
+  Programs: "/programs",
+  Tier: "/programs/tiers",
+  Tasks: "/command/tasks",
+  ACE: "/ace",
+  MDF: "/mdf",
+};
+const COHORT_SITUATIONS: readonly Situation[] = [
+  "overdue_work",
+  "blocked_work",
+  "mdf_deadline",
+  "aws_review",
+  "roadmap_risk",
+  "renewal_due",
+  "evidence",
+];
+const driverColor = (score: number): string =>
+  score >= 70 ? "var(--ok)" : score >= 45 ? "var(--warn)" : "var(--danger)";
 
 function isView(v: string | undefined): v is DecisionView {
   return v !== undefined && (DECISION_VIEWS as readonly string[]).includes(v);
@@ -39,6 +67,8 @@ function isView(v: string | undefined): v is DecisionView {
 
 const pctOf = (part: number, whole: number): number =>
   whole <= 0 ? 0 : Math.round((part / whole) * 100);
+
+const money = (n: number): string => `$${n.toLocaleString()}`;
 
 export default async function CommandPage({
   searchParams,
@@ -59,11 +89,27 @@ export default async function CommandPage({
   const emailById = new Map(data.members.map((m) => [m.id, m.email]));
   const ownerName = (id: string | null) => (id ? emailById.get(id) ?? "—" : "Unassigned");
 
+  // Cross-section snapshot for the brief KPI cards — reuses the opportunities + MDF
+  // rows the loader already pulled (no extra queries) via the existing pure helpers.
+  const pipe = pipelineSummary(data.inputs.opportunities, today);
+  const mdf = portfolioSummary(data.inputs.mdf, today);
+
   // Executive mode emphasizes the few critical/high items; workbench shows all.
   const decisions =
     mode === "executive"
       ? cc.decisions.filter((d) => d.severity !== "medium").slice(0, 6)
       : filterDecisions(cc.decisions, view);
+
+  // Decision workload by owner — who's carrying the most open decisions.
+  const ownerLoad = new Map<string, number>();
+  for (const d of cc.decisions) {
+    const k = d.ownerUserId ?? "__unassigned__";
+    ownerLoad.set(k, (ownerLoad.get(k) ?? 0) + 1);
+  }
+  const ownerLoadRows = [...ownerLoad.entries()]
+    .map(([k, n]) => ({ name: k === "__unassigned__" ? "Unassigned" : ownerName(k), n }))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 5);
 
   return (
     <PageShell>
@@ -83,6 +129,7 @@ export default async function CommandPage({
           </>
         }
       />
+      <CommandNav />
 
       {/* Today's Command Brief */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
@@ -95,13 +142,20 @@ export default async function CommandPage({
               size={112}
             />
             {mode === "workbench" && (
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <BarChart
-                  data={cc.health.drivers.map((d) => ({ label: d.label, value: d.score }))}
-                  max={100}
-                  color={BAND_COLOR[cc.health.band]}
-                  formatValue={(n) => String(n)}
-                />
+              <div style={{ flex: 1, minWidth: 180, display: "grid", gap: 6 }}>
+                {cc.health.drivers.map((d) => (
+                  <div key={d.label} style={{ display: "grid", gridTemplateColumns: "minmax(64px, 84px) 1fr auto", gap: 8, alignItems: "center", fontSize: 12 }}>
+                    {DRIVER_LINK[d.label] ? (
+                      <Link href={DRIVER_LINK[d.label]!} style={{ color: "var(--accent)", textDecoration: "none" }}>{d.label}</Link>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}>{d.label}</span>
+                    )}
+                    <div style={{ height: 6, background: "var(--border)", borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.max(0, Math.min(100, d.score))}%`, height: "100%", background: driverColor(d.score), borderRadius: 999 }} />
+                    </div>
+                    <span style={{ color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>{d.score}</span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -132,7 +186,14 @@ export default async function CommandPage({
           )}
         </Panel>
 
-        <Panel title="Work">
+        <Panel
+          title="Work"
+          actions={
+            <Link href="/command/tasks" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
+              Open tasks →
+            </Link>
+          }
+        >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 14 }}>
             <Stat label="Open" value={cc.work.open} />
             <Stat label="Overdue" value={cc.work.overdue} danger={cc.work.overdue > 0} />
@@ -140,10 +201,62 @@ export default async function CommandPage({
             <Stat label="Critical" value={cc.work.critical} danger={cc.work.critical > 0} />
           </div>
         </Panel>
+
+        <Panel title="Decision load by owner">
+          {ownerLoadRows.length === 0 ? (
+            <p style={{ color: "var(--muted)", margin: 0, fontSize: 13 }}>No open decisions.</p>
+          ) : (
+            <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+              {ownerLoadRows.map((r) => (
+                <div key={r.name} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                  <strong style={{ fontVariantNumeric: "tabular-nums" }}>{r.n}</strong>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
+        {/* Cross-section snapshot — fills the brief row beside "Decision load by owner". */}
+        <MetricCard
+          label="Open pipeline"
+          value={money(pipe.openValue)}
+          sub={`${pipe.open} open ${pipe.open === 1 ? "deal" : "deals"}`}
+          tone="accent"
+          style={{ alignSelf: "start" }}
+        />
+        <MetricCard
+          label="MDF pending"
+          value={money(mdf.remaining)}
+          sub="approved, unclaimed"
+          tone={mdf.deadlineRisks > 0 ? "warn" : "accent"}
+          tint={mdf.deadlineRisks > 0 ? "warn" : undefined}
+          style={{ alignSelf: "start" }}
+        />
+        <MetricCard
+          label="Active programs"
+          value={`${cc.progress.programsActive}/${cc.progress.programsTotal}`}
+          sub="competencies & tiers"
+          tone="ok"
+          style={{ alignSelf: "start" }}
+        />
       </div>
 
       {/* Decision queue */}
       <Panel title="Decision queue">
+        {mode === "executive" && (
+          <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+            {COHORT_SITUATIONS.map((s) => {
+              const n = cc.decisions.filter((d) => d.situation === s).length;
+              if (n === 0) return null;
+              return (
+                <Link key={s} href={`/command?mode=workbench&view=${s}`} style={{ padding: "4px 10px", borderRadius: 999, fontSize: 12, textDecoration: "none", border: "1px solid var(--border)", color: "var(--muted)" }}>
+                  {SITUATION_LABELS[s]} ({n})
+                </Link>
+              );
+            })}
+          </nav>
+        )}
         {mode === "workbench" && (
           <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             {DECISION_VIEWS.map((v) => {
@@ -162,7 +275,7 @@ export default async function CommandPage({
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {decisions.map((d) => (
-              <DecisionRow key={d.id} d={d} ownerName={ownerName} />
+              <DecisionRow key={d.id} d={d} ownerName={ownerName} today={today} />
             ))}
           </div>
         )}
@@ -196,18 +309,14 @@ export default async function CommandPage({
       {/* Recent workflow receipts (audit ledger) */}
       {canReceipts && (
         <Panel title="Recent workflow receipts">
-          {data.receipts.length === 0 ? (
-            <p style={{ color: "var(--muted)", margin: 0 }}>No activity yet.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
-              {data.receipts.map((r, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", color: "var(--muted)", borderBottom: "1px solid var(--border)", paddingBottom: 3 }}>
-                  <span><strong style={{ color: "var(--text)" }}>{r.action}</strong> · {r.resourceType}</span>
-                  <span>{ownerName(r.actorUserId)} · {r.createdAt.toISOString().slice(0, 16).replace("T", " ")}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          <ActivityList
+            items={data.receipts.map((r) => ({
+              action: r.action,
+              resourceType: r.resourceType,
+              actor: ownerName(r.actorUserId),
+              at: r.createdAt,
+            }))}
+          />
         </Panel>
       )}
     </PageShell>
@@ -223,7 +332,24 @@ function Stat({ label, value, danger }: { label: string; value: number; danger?:
   );
 }
 
-function DecisionRow({ d, ownerName }: { d: Decision; ownerName: (id: string | null) => string }): ReactNode {
+function DecisionRow({
+  d,
+  ownerName,
+  today,
+}: {
+  d: Decision;
+  ownerName: (id: string | null) => string;
+  today: string;
+}): ReactNode {
+  const days = d.dueDate ? daysBetween(today, d.dueDate) : null;
+  const urgency =
+    days === null
+      ? null
+      : days < 0
+        ? { text: `overdue ${Math.abs(days)}d`, color: "var(--danger)" }
+        : days <= 7
+          ? { text: `due in ${days}d`, color: "var(--warn)" }
+          : { text: `due ${d.dueDate}`, color: "var(--muted)" };
   return (
     <Card compact interactive style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
       <div>
@@ -233,7 +359,7 @@ function DecisionRow({ d, ownerName }: { d: Decision; ownerName: (id: string | n
       </div>
       <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
         {ownerName(d.ownerUserId)}
-        {d.dueDate ? <><br />due {d.dueDate}</> : null}
+        {urgency ? <><br /><span style={{ color: urgency.color, fontWeight: 600 }}>{urgency.text}</span></> : null}
       </div>
     </Card>
   );

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, count, eq, inArray, sql } from "drizzle-orm";
 import {
   competencyApplications,
   applicationControls,
@@ -194,6 +194,39 @@ async function recomputeAccepted(
     );
 }
 
+export interface BulkUpdateControlsInput {
+  readonly applicationId: string;
+  readonly ids: readonly string[];
+  readonly status?: "open" | "generated" | "accepted" | "edited";
+  readonly met?: MetSuggestion;
+}
+
+/** Bulk-apply a status and/or Met? to selected controls of ONE application, then roll up acceptedCount. */
+export async function bulkUpdateControlsOp(
+  { identity, tx }: MutationContext,
+  input: BulkUpdateControlsInput,
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No controls selected");
+  const set: Record<string, unknown> = { updatedAt: sql`now()` };
+  if (input.status !== undefined) set.status = input.status;
+  if (input.met !== undefined) set.metSuggestion = input.met;
+
+  const updated = await tx
+    .update(applicationControls)
+    .set(set)
+    .where(
+      and(
+        inArray(applicationControls.id, [...input.ids]),
+        eq(applicationControls.applicationId, input.applicationId),
+        eq(applicationControls.tenantId, identity.tenantId),
+      ),
+    )
+    .returning({ id: applicationControls.id });
+
+  await recomputeAccepted(tx, identity.tenantId, input.applicationId);
+  return { count: updated.length };
+}
+
 export async function markExportedOp(
   { identity, tx }: MutationContext,
   input: { readonly applicationId: string },
@@ -220,6 +253,7 @@ export interface UpdateApplicationInput {
   readonly pocRole?: string;
   readonly awsStatus?: AwsStatus;
   readonly solutionId?: string | null;
+  readonly programId?: string | null;
 }
 
 /** Update packet metadata (categories, POC) + the AWS application status. */
@@ -239,6 +273,7 @@ export async function updateApplicationOp(
     if (input.awsStatus === "confirmed") set.confirmedAt = sql`COALESCE(confirmed_at, now())`;
   }
   if (input.solutionId !== undefined) set.solutionId = input.solutionId;
+  if (input.programId !== undefined) set.programId = input.programId;
 
   const [u] = await tx
     .update(competencyApplications)

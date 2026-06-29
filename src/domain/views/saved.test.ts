@@ -35,14 +35,14 @@ describe("saved view helpers", () => {
   });
 
   it("builds an apply href from a list key + query", () => {
-    expect(savedViewHref("tasks", "view=overdue")).toBe("/tasks?view=overdue");
+    expect(savedViewHref("tasks", "view=overdue")).toBe("/command/tasks?view=overdue");
     expect(savedViewHref("ace:opportunities", "tab=opportunities&view=high_value")).toBe(
       "/ace?tab=opportunities&view=high_value",
     );
   });
 
   it("returns the bare base path for an empty query", () => {
-    expect(savedViewHref("evidence", "")).toBe("/evidence");
+    expect(savedViewHref("evidence", "")).toBe("/programs/evidence");
   });
 
   it("every registered list has a non-empty key, basePath, and label", () => {

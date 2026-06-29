@@ -54,7 +54,7 @@ export async function loadCompetencyRecommendations(
 
     // 3. Persisted business model (onboarding; one row per tenant).
     const [ob] = await tx
-      .select({ partnerType: onboarding.partnerType, industry: onboarding.industry })
+      .select({ partnerType: onboarding.partnerType, industry: onboarding.industry, objectives: onboarding.objectives })
       .from(onboarding)
       .where(eq(onboarding.tenantId, t))
       .limit(1);
@@ -63,6 +63,7 @@ export async function loadCompetencyRecommendations(
       industry: ob?.industry ?? null,
     };
     const hasProfile = Boolean(ob && (ob.partnerType || ob.industry));
+    const objectives = Array.isArray(ob?.objectives) ? (ob.objectives as string[]) : [];
 
     // 4. Latest scored GTM/readiness assessment + its module scores.
     const [scored] = await tx
@@ -95,7 +96,7 @@ export async function loadCompetencyRecommendations(
       };
     }
 
-    const all = recommendCompetencies({ fits, profile, readiness, adoptedKeys });
+    const all = recommendCompetencies({ fits, profile, readiness, adoptedKeys, objectives });
     const recommendations = all.filter((r) => isRecommendedType(r.programType));
 
     return {

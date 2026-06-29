@@ -58,7 +58,7 @@ export async function createTierPlan(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
+  revalidatePath("/programs/tiers");
   return { ok: true };
 }
 
@@ -104,7 +104,7 @@ export async function updateTierRequirement(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
+  revalidatePath("/programs/tiers");
   return { ok: true };
 }
 
@@ -142,7 +142,7 @@ export async function updateTierPlan(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
+  revalidatePath("/programs/tiers");
   return { ok: true };
 }
 
@@ -166,8 +166,8 @@ export async function createTierRequirementTask(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
-  revalidatePath("/tasks");
+  revalidatePath("/programs/tiers");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 
@@ -191,8 +191,8 @@ export async function stageTierRequirementEvidence(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
-  revalidatePath("/evidence");
+  revalidatePath("/programs/tiers");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -215,7 +215,7 @@ export async function advanceTier(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/tiers");
+  revalidatePath("/programs/tiers");
   revalidatePath("/");
   return { ok: true };
 }

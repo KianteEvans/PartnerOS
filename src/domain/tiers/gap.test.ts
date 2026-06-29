@@ -6,6 +6,7 @@ import {
   canAdvance,
   phaseFor,
   advancementPlan,
+  coverage,
   type RequirementValue,
 } from "@/domain/tiers/gap";
 
@@ -53,5 +54,23 @@ describe("tier gap analysis", () => {
     expect(plan.phase30.map((r) => r.key)).toEqual(["near"]);
     expect(plan.phase60.map((r) => r.key)).toEqual(["mid"]);
     expect(plan.phase90.map((r) => r.key)).toEqual(["far"]);
+  });
+
+  it("coverage counts only OPEN gaps that are actioned (task or evidence)", () => {
+    const c = coverage([
+      { met: true, hasTask: false, hasEvidence: false }, // met -> not an open gap
+      { met: false, hasTask: true, hasEvidence: false }, // open + task
+      { met: false, hasTask: false, hasEvidence: true }, // open + evidence
+      { met: false, hasTask: true, hasEvidence: true }, // open + both
+      { met: false, hasTask: false, hasEvidence: false }, // open, unactioned
+    ]);
+    expect(c).toEqual({ total: 5, met: 1, open: 4, withTask: 2, withEvidence: 2, actioned: 3 });
+  });
+
+  it("coverage on an all-met plan reports zero open gaps", () => {
+    expect(coverage([{ met: true, hasTask: false, hasEvidence: false }])).toEqual({
+      total: 1, met: 1, open: 0, withTask: 0, withEvidence: 0, actioned: 0,
+    });
+    expect(coverage([])).toEqual({ total: 0, met: 0, open: 0, withTask: 0, withEvidence: 0, actioned: 0 });
   });
 });

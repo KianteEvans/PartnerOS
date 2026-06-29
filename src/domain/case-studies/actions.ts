@@ -50,8 +50,8 @@ export async function createCaseStudy(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/case-studies");
-  redirect(`/case-studies/${newId}`);
+  revalidatePath("/programs/evidence/case-studies");
+  redirect(`/programs/evidence/case-studies/${newId}`);
 }
 
 export async function updateCaseStudy(
@@ -93,8 +93,8 @@ export async function updateCaseStudy(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/case-studies/${caseStudyId}`);
-  revalidatePath("/case-studies");
+  revalidatePath(`/programs/evidence/case-studies/${caseStudyId}`);
+  revalidatePath("/programs/evidence/case-studies");
   return { ok: true };
 }
 
@@ -118,7 +118,7 @@ export async function attachCaseStudy(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/applications/${applicationId}`);
+  revalidatePath(`/programs/applications/${applicationId}`);
   return { ok: true };
 }
 
@@ -142,6 +142,6 @@ export async function detachCaseStudy(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/applications/${applicationId}`);
+  revalidatePath(`/programs/applications/${applicationId}`);
   return { ok: true };
 }

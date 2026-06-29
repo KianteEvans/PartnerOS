@@ -65,7 +65,7 @@ export async function createEvidence(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -127,7 +127,7 @@ export async function updateEvidence(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -164,7 +164,7 @@ export async function bulkUpdateEvidence(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -198,7 +198,7 @@ export async function reviewEvidence(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -236,7 +236,7 @@ export async function uploadEvidenceFile(
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 

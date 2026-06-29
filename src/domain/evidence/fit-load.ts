@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { withTenant } from "@/db/client";
 import type { DbIdentity, TenantDb } from "@/db/client";
-import { evidence, programs } from "@/db/schema";
+import { caseStudies, evidence, programs } from "@/db/schema";
+import { caseStudyCompleteness } from "@/domain/case-studies/aspects";
 import {
   rankProgramFit,
   fitSummary,
@@ -14,6 +15,11 @@ import {
  * Project a tenant's evidence rows into the signals the pure fit engine consumes.
  * Extracted so the competency recommender's loader reuses the exact same projection
  * (one definition of "evidence -> signals"). Caller supplies the RLS-scoped tx.
+ *
+ * A customer case study IS evidence: a fully-drafted one is reusable proof that
+ * satisfies the customer-reference requirements many AWS programs ask for. So each
+ * complete case study (all five narrative aspects filled) is projected as an approved
+ * `case_study` signal here — the locker credits them toward coverage like any artifact.
  */
 export async function selectFitSignals(tx: TenantDb, tenantId: string): Promise<EvidenceSignal[]> {
   const rows = await tx
@@ -27,7 +33,7 @@ export async function selectFitSignals(tx: TenantDb, tenantId: string): Promise<
     })
     .from(evidence)
     .where(eq(evidence.tenantId, tenantId));
-  return rows.map((r) => ({
+  const evidenceSignals: EvidenceSignal[] = rows.map((r) => ({
     evidenceType: r.evidenceType,
     status: r.status,
     program: r.program,
@@ -35,6 +41,32 @@ export async function selectFitSignals(tx: TenantDb, tenantId: string): Promise<
     qualityScore: r.qualityScore,
     reusable: r.reusable,
   }));
+
+  const studies = await tx
+    .select({
+      aboutCustomer: caseStudies.aboutCustomer,
+      challenge: caseStudies.challenge,
+      goals: caseStudies.goals,
+      solution: caseStudies.solution,
+      outcomes: caseStudies.outcomes,
+    })
+    .from(caseStudies)
+    .where(eq(caseStudies.tenantId, tenantId));
+  const caseStudySignals: EvidenceSignal[] = studies
+    .filter((s) => {
+      const c = caseStudyCompleteness(s);
+      return c.filled === c.total;
+    })
+    .map(() => ({
+      evidenceType: "case_study",
+      status: "approved",
+      program: null,
+      expirationDate: null,
+      qualityScore: null,
+      reusable: true,
+    }));
+
+  return [...evidenceSignals, ...caseStudySignals];
 }
 
 /**

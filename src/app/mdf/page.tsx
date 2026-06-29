@@ -11,13 +11,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Table } from "@/components/ui/Table";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { BarChart } from "@/components/ui/BarChart";
+import { RingGauge } from "@/components/ui/RingGauge";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
 import { Pagination } from "@/components/ui/Pagination";
 import { createMdfRequest } from "@/domain/mdf/actions";
 import { MDF_STATUS_LABELS, type MdfStatus } from "@/domain/mdf/lifecycle";
-import { portfolioSummary, deadlineRisk, type MdfLike } from "@/domain/mdf/analytics";
+import { portfolioSummary, deadlineRisk, reimbursementRate, type MdfLike } from "@/domain/mdf/analytics";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 
 const MDF_SORT = {
@@ -134,7 +137,42 @@ export default async function MdfPage({
         }
       />
 
-      <Panel title="Reconciliation overview">
+      {/* Health hero: reimbursement completion + headline funding KPIs */}
+      <section
+        style={{
+          display: "flex",
+          gap: 20,
+          flexWrap: "wrap",
+          alignItems: "center",
+          background: "var(--surface-hero)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)",
+          padding: 20,
+          boxShadow: "var(--shadow-md)",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 150 }}>
+          <RingGauge value={reimbursementRate(summary)} color="var(--ok)" caption="reimbursed" size={120} />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>of approved funds</span>
+        </div>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <MetricStrip min={130}>
+            <MetricCard label="Approved" value={money(summary.approved)} />
+            <MetricCard label="Pending claim" value={money(summary.remaining)} tone={summary.remaining > 0 ? "warn" : "neutral"} />
+            <MetricCard label="Expected pipeline" value={money(summary.pipeline)} />
+            <MetricCard label="Avg ROI" value={summary.roi == null ? "—" : `${summary.roi}x`} tone="accent" />
+            <MetricCard
+              label="Deadline risks"
+              value={String(summary.deadlineRisks)}
+              tone={summary.deadlineRisks > 0 ? "danger" : "neutral"}
+              {...(summary.deadlineRisks > 0 ? { tint: "danger" as const } : {})}
+            />
+            <MetricCard label="Open" value={String(summary.openCount)} />
+          </MetricStrip>
+        </div>
+      </section>
+
+      <Panel title="Reconciliation funnel">
         {/* Funnel: each lifecycle stage as a share of the total requested. */}
         <BarChart
           max={summary.requested}
@@ -146,29 +184,6 @@ export default async function MdfPage({
             { label: "Reimbursed", value: summary.reimbursed, display: money(summary.reimbursed), color: "var(--ok)" },
           ]}
         />
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-            gap: 12,
-            marginTop: 16,
-            paddingTop: 16,
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          {([
-            ["Remaining", money(summary.remaining)],
-            ["Pipeline", money(summary.pipeline)],
-            ["ROI", summary.roi == null ? "—" : `${summary.roi}x`],
-            ["Deadline risks", String(summary.deadlineRisks)],
-            ["Open", String(summary.openCount)],
-          ] as const).map(([k, v]) => (
-            <div key={k}>
-              <div style={{ color: "var(--muted)", fontSize: 12 }}>{k}</div>
-              <div style={{ fontSize: 18, fontWeight: 600 }}>{v}</div>
-            </div>
-          ))}
-        </div>
       </Panel>
 
       <SavedViewsBar listKey="mdf" current={{ q: params.q, sort: params.sort, dir: params.dir }} />

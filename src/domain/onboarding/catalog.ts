@@ -1,4 +1,6 @@
 import type { PresetId } from "@/domain/assessments/catalog";
+import { PROGRAM_LIBRARY } from "@/domain/programs/library";
+import { tiersAbove, type TierId } from "@/domain/tiers/catalog";
 
 /**
  * Static, code-versioned onboarding content and the pure planning logic that
@@ -135,10 +137,47 @@ export interface KickoffTask {
 }
 
 /**
- * The initial tasks seeded into Task Manager when onboarding completes. A shared
- * baseline plus a path-specific item. Deterministic for a given path.
+ * Objective-specific kickoff tasks, appended one per stated objective. `evidence`
+ * is intentionally omitted — the baseline already covers "upload your first case
+ * study". Keys are namespaced (`obj:*`) so the sourceRef stays unique.
  */
-export function kickoffTasks(path: PathId): readonly KickoffTask[] {
+const OBJECTIVE_TASKS: Record<string, Omit<KickoffTask, "key">> = {
+  competency: {
+    title: "Pick a target Competency to pursue",
+    description: "Open the Recommended view in Program Management and adopt your best-fit Competency.",
+    priority: "high",
+  },
+  tier_advancement: {
+    title: "Open your tier advancement plan",
+    description: "Review the gap to your next AWS partner tier and start a plan from Program Management.",
+    priority: "medium",
+  },
+  cosell: {
+    title: "Add your first AWS co-sell opportunity",
+    description: "Create an opportunity in ACE Pipeline to start tracking co-sell with AWS.",
+    priority: "high",
+  },
+  marketplace: {
+    title: "Register your first Marketplace Solution",
+    description: "Add a Solution to track AWS Marketplace listing readiness.",
+    priority: "medium",
+  },
+  mdf: {
+    title: "Check MDF eligibility for a GTM activity",
+    description: "Create an MDF request to fund your first co-marketing campaign.",
+    priority: "medium",
+  },
+};
+
+/**
+ * The initial tasks seeded into Task Manager when onboarding completes: a shared
+ * baseline + a path-specific item + one task per stated objective. Deterministic
+ * for a given (path, objectives), with stable, unique keys for the sourceRef.
+ */
+export function kickoffTasks(
+  path: PathId,
+  objectives: readonly string[] = [],
+): readonly KickoffTask[] {
   const base: KickoffTask[] = [
     {
       key: "profile",
@@ -180,7 +219,10 @@ export function kickoffTasks(path: PathId): readonly KickoffTask[] {
       priority: "high",
     },
   };
-  return [...base, perPath[path]];
+  const objectiveTasks: KickoffTask[] = normalizeObjectives(objectives)
+    .filter((key) => key in OBJECTIVE_TASKS)
+    .map((key) => ({ key: `obj:${key}`, ...OBJECTIVE_TASKS[key]! }));
+  return [...base, perPath[path], ...objectiveTasks];
 }
 
 /** Progress 0–100 based on how far through the wizard the step is. */
@@ -195,3 +237,61 @@ export function progressPercent(step: OnboardingStepId): number {
 export function stepIndex(step: OnboardingStepId): number {
   return WIZARD_STEPS.indexOf(step);
 }
+
+/**
+ * Map the self-reported AWS Partner Central stage to a starting PartnerOS tier.
+ * Exploring/Registered (and anything unknown) stay at the entry tier; the rest
+ * map straight across. Used only as a guarded, upward-only starting estimate.
+ */
+export function stageToTier(awsStage: string | null | undefined): TierId {
+  switch ((awsStage ?? "").trim().toLowerCase()) {
+    case "select":
+      return "select";
+    case "advanced":
+      return "advanced";
+    case "premier":
+      return "premier";
+    default:
+      return "registered";
+  }
+}
+
+export interface StarterSelection {
+  readonly programKeys: readonly string[];
+  readonly targetTier: TierId | null;
+}
+
+/**
+ * The starter-roadmap selection composed on completion, derived from the chosen
+ * path + objectives + AWS stage. Targets the next tier up (advancement-shaped
+ * paths or a tier_advancement objective) and seeds 1-2 foundational Competencies
+ * when competency-building is a goal. Pure — `composeMilestones` turns it into
+ * milestones. May be empty (e.g. Premier + no competency goal); the caller skips
+ * roadmap creation in that case.
+ */
+export function starterRoadmapSelection(
+  path: PathId,
+  objectives: readonly string[],
+  awsStage: string | null | undefined,
+): StarterSelection {
+  const objs = new Set(normalizeObjectives(objectives));
+  const current = stageToTier(awsStage);
+  const wantTier = objs.has("tier_advancement") || path === "growth" || path === "scale" || objs.size === 0;
+  const targetTier: TierId | null = wantTier ? (tiersAbove(current)[0] ?? null) : null;
+  const wantCompetency = objs.has("competency") || path === "foundations";
+  const programKeys = wantCompetency
+    ? PROGRAM_LIBRARY.filter((p) => p.programType === "Competency").slice(0, 2).map((p) => p.key)
+    : [];
+  return { programKeys, targetTier };
+}
+
+/** One-line helper text shown under each wizard control to reduce guesswork. */
+export const FIELD_HELP: Record<string, string> = {
+  companyName: "The trading name AWS knows you by — used to name your starter assessment.",
+  industry: "Your primary vertical — tailors competency recommendations.",
+  partnerType: "How you mainly engage AWS customers — drives your recommended competencies.",
+  awsStage: "Your current AWS Partner Central stage — sets your starting tier estimate.",
+  teamSize: "Rough headcount working on the AWS partnership.",
+  objectives: "Pick what matters most — we tailor your kickoff tasks and starter roadmap to these.",
+  path: "Choose the track that matches where you are — it seeds your starter readiness assessment.",
+};

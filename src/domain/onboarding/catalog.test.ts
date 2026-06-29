@@ -5,6 +5,8 @@ import {
   kickoffTasks,
   progressPercent,
   stepIndex,
+  stageToTier,
+  starterRoadmapSelection,
   WIZARD_STEPS,
 } from "@/domain/onboarding/catalog";
 
@@ -35,6 +37,40 @@ describe("onboarding catalog", () => {
     expect(kickoffTasks("foundations").at(-1)!.title).not.toBe(
       kickoffTasks("scale").at(-1)!.title,
     );
+  });
+
+  it("kickoffTasks appends one task per stated objective (evidence is baseline-covered)", () => {
+    const tasks = kickoffTasks("growth", ["cosell", "mdf", "evidence", "bogus"]);
+    const keys = tasks.map((t) => t.key);
+    // baseline(3) + path(1) + cosell + mdf; evidence omitted, bogus dropped
+    expect(keys).toEqual(["profile", "assessment", "evidence", "path", "obj:cosell", "obj:mdf"]);
+    expect(new Set(keys).size).toBe(keys.length); // stable, unique source refs
+  });
+
+  it("stageToTier maps AWS stage to a starting tier (entry by default)", () => {
+    expect(stageToTier("Exploring")).toBe("registered");
+    expect(stageToTier("Registered")).toBe("registered");
+    expect(stageToTier("Select")).toBe("select");
+    expect(stageToTier("Advanced")).toBe("advanced");
+    expect(stageToTier("Premier")).toBe("premier");
+    expect(stageToTier(null)).toBe("registered");
+  });
+
+  it("starterRoadmapSelection targets the next tier and seeds competencies by goal", () => {
+    // Select stage + competency goal -> next tier (advanced) + 2 competency programs.
+    const a = starterRoadmapSelection("growth", ["competency", "tier_advancement"], "Select");
+    expect(a.targetTier).toBe("advanced");
+    expect(a.programKeys.length).toBe(2);
+
+    // Scale path, no competency goal -> tier only, no programs.
+    const b = starterRoadmapSelection("scale", ["cosell"], "Registered");
+    expect(b.targetTier).toBe("select");
+    expect(b.programKeys).toEqual([]);
+
+    // Premier + no competency goal -> nothing to seed (caller skips the roadmap).
+    const c = starterRoadmapSelection("scale", ["cosell"], "Premier");
+    expect(c.targetTier).toBeNull();
+    expect(c.programKeys).toEqual([]);
   });
 
   it("progress advances across the wizard and tops out at done", () => {

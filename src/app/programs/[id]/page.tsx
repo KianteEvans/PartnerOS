@@ -12,11 +12,15 @@ import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { Table, type Column } from "@/components/ui/Table";
 import { BarChart } from "@/components/ui/BarChart";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { EvaluateEvidence } from "@/components/ui/EvaluateEvidence";
 import { env } from "@/env";
 import { loadProgramRoiDetail, type RoiOppRow } from "@/domain/programs/roi-load";
+import { loadApplicationsForProgram } from "@/domain/applications/load";
+import { awsStatusLabel } from "@/domain/applications/packet";
 import { AWS_ORG_TITLE_LABELS, type RepRollup } from "@/domain/ace/sales-org";
 import { STAGE_LABELS } from "@/domain/ace/opportunities";
 import {
@@ -38,16 +42,14 @@ const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
 const money = (n: number): string => `$${n.toLocaleString()}`;
 const stageLabel = (s: string): string => (STAGE_LABELS as Record<string, string>)[s] ?? s;
-
-function RoiStat({ label, value, accent }: { label: string; value: string; accent?: "ok" | "info" }): ReactNode {
-  const color = accent === "ok" ? "var(--ok)" : accent === "info" ? "var(--info)" : "var(--text)";
-  return (
-    <div style={{ display: "grid", gap: 2, minWidth: 110 }}>
-      <span style={{ fontSize: 20, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>{value}</span>
-      <span style={{ fontSize: 12, color: "var(--muted)" }}>{label}</span>
-    </div>
-  );
+function awsTone(s: string): "ok" | "danger" | "warn" | "neutral" | "info" {
+  if (s === "confirmed") return "ok";
+  if (s === "declined" || s === "expired" || s === "deleted") return "danger";
+  if (s === "pending_partner_action") return "warn";
+  if (s === "draft") return "neutral";
+  return "info";
 }
+
 const controlStyle = {
   background: "var(--bg)",
   border: "1px solid var(--border)",
@@ -111,6 +113,8 @@ export default async function ProgramDetailPage({
   // Competency ROI: attributed ACE opportunities + the AWS segment/team behind them.
   const roiDetail =
     program.programType === "Competency" ? await loadProgramRoiDetail(identity, id) : null;
+  // Submit stage: the self-assessment workbook(s) linked to this program.
+  const applications = await loadApplicationsForProgram(identity, id);
 
   const states: RequirementState[] = reqs.map((r) => ({
     status: r.status,
@@ -213,16 +217,18 @@ export default async function ProgramDetailPage({
             ACE opportunities credited to this competency
             {roiDetail.achievedAt ? <> · achieved ~{roiDetail.achievedAt}</> : <> · not yet achieved</>}
           </p>
-          <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginBottom: 16 }}>
-            <RoiStat label="Attributed deals" value={String(roiDetail.roi.attributedCount)} />
-            <RoiStat label="Open pipeline" value={money(roiDetail.roi.openTCV)} accent="info" />
-            <RoiStat label="Won TCV" value={money(roiDetail.roi.wonTCV)} accent="ok" />
-            <RoiStat label="Launched" value={String(roiDetail.roi.launchedCount)} />
-            <RoiStat
-              label="Won since achieved"
-              value={roiDetail.roi.influencedWonTCV === null ? "—" : money(roiDetail.roi.influencedWonTCV)}
-              accent="ok"
-            />
+          <div style={{ marginBottom: 16 }}>
+            <MetricStrip min={140}>
+              <MetricCard label="Attributed deals" value={String(roiDetail.roi.attributedCount)} />
+              <MetricCard label="Open pipeline" value={money(roiDetail.roi.openTCV)} tone="info" />
+              <MetricCard label="Won TCV" value={money(roiDetail.roi.wonTCV)} tone="ok" />
+              <MetricCard label="Launched" value={String(roiDetail.roi.launchedCount)} />
+              <MetricCard
+                label="Won since achieved"
+                value={roiDetail.roi.influencedWonTCV === null ? "—" : money(roiDetail.roi.influencedWonTCV)}
+                tone="ok"
+              />
+            </MetricStrip>
           </div>
 
           <Table
@@ -251,7 +257,14 @@ export default async function ProgramDetailPage({
         </Panel>
       )}
 
-      <Panel title={`Requirements (${reqs.length})`}>
+      <Panel
+        title={`Requirements (${reqs.length})`}
+        actions={
+          <Link href="/programs/evidence/fit" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
+            Coverage analysis →
+          </Link>
+        }
+      >
         <div style={{ display: "grid", gap: 14 }}>
           {reqs.map((r) => (
             <Card key={r.id}>
@@ -267,7 +280,7 @@ export default async function ProgramDetailPage({
                 <span>
                   Evidence:{" "}
                   {r.evidenceId ? (
-                    <Link href="/evidence" style={{ color: "var(--accent)" }}>
+                    <Link href="/programs/evidence" style={{ color: "var(--accent)" }}>
                       linked ({r.evidenceStatus})
                     </Link>
                   ) : (
@@ -277,7 +290,7 @@ export default async function ProgramDetailPage({
                 <span>
                   Task:{" "}
                   {r.taskId ? (
-                    <Link href="/tasks" style={{ color: "var(--accent)" }}>
+                    <Link href="/command/tasks" style={{ color: "var(--accent)" }}>
                       created ({r.taskStatus})
                     </Link>
                   ) : (
@@ -336,6 +349,49 @@ export default async function ProgramDetailPage({
             </Card>
           ))}
         </div>
+      </Panel>
+
+      <Panel
+        title={`Applications (${applications.length})`}
+        actions={
+          <Link href="/programs/applications" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
+            Upload application →
+          </Link>
+        }
+      >
+        <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)" }}>
+          AWS self-assessment workbooks submitted for this program. Link a workbook to this program
+          from its submission packet.
+        </p>
+        {applications.length === 0 ? (
+          <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+            No applications linked yet. Upload the self-assessment in{" "}
+            <Link href="/programs/applications" style={{ color: "var(--accent)" }}>
+              Submit
+            </Link>
+            , then link it from the packet editor.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {applications.map((a) => (
+              <Card key={a.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <Link
+                    href={`/programs/applications/${a.id}`}
+                    style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14, fontWeight: 600 }}
+                  >
+                    {a.name}
+                  </Link>
+                  <Badge tone={awsTone(a.awsStatus)}>{awsStatusLabel(a.awsStatus)}</Badge>
+                </div>
+                <p style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0 0" }}>
+                  <strong style={{ color: "var(--text)" }}>{a.acceptedCount}</strong>/{a.controlCount} controls accepted ·{" "}
+                  {a.sourceFileName}
+                </p>
+              </Card>
+            ))}
+          </div>
+        )}
       </Panel>
     </PageShell>
   );

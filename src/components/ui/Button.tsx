@@ -13,7 +13,9 @@ export type ButtonSize = "sm" | "md";
 
 function buttonStyle(variant: ButtonVariant, size: ButtonSize, fullWidth?: boolean): CSSProperties {
   const variants: Record<ButtonVariant, CSSProperties> = {
-    primary: { background: "var(--accent)", color: "var(--accent-ink)", borderColor: "var(--accent)", boxShadow: "var(--shadow-sm)" },
+    // box-shadow lives on the .pos-btn-primary class (globals.css) so the :hover
+    // glow can override it — an inline box-shadow would out-specify the stylesheet.
+    primary: { background: "var(--accent)", color: "var(--accent-ink)", borderColor: "var(--accent)" },
     secondary: { background: "var(--panel)", color: "var(--text)", borderColor: "var(--border)" },
     ghost: { background: "transparent", color: "var(--muted)", borderColor: "transparent" },
     danger: {
@@ -63,6 +65,7 @@ export function Button({
       type={type}
       disabled={disabled}
       onClick={onClick}
+      className={variant === "primary" ? "pos-btn-primary" : undefined}
       style={{ ...buttonStyle(variant, size, fullWidth), opacity: disabled ? 0.6 : 1 }}
     >
       {children}
@@ -86,12 +89,13 @@ export function ButtonLink({
   children: ReactNode;
 }): ReactNode {
   const style = buttonStyle(variant, size, fullWidth);
+  const className = variant === "primary" ? "pos-btn-primary" : undefined;
   return external ? (
-    <a href={href} style={style}>
+    <a href={href} style={style} className={className}>
       {children}
     </a>
   ) : (
-    <Link href={href} style={style}>
+    <Link href={href} style={style} className={className}>
       {children}
     </Link>
   );

@@ -256,11 +256,14 @@ export async function createTaskFromRequestOp(
   const req = await loadRequest(ctx, input.id);
   const { taskId } = await createSourcedTask(ctx, {
     title: `MDF: ${req.title}`,
-    description: `Execute the MDF activity and collect proof of performance.`,
+    description: req.claimDeadline
+      ? `Execute the MDF activity, collect proof of performance, and submit the claim by ${req.claimDeadline}.`
+      : `Execute the MDF activity and collect proof of performance.`,
     priority: "medium",
     source: "mdf",
     sourceRef: req.id,
     ownerUserId: req.ownerUserId,
+    dueDate: req.claimDeadline,
   });
   if (taskId) {
     await ctx.tx

@@ -16,11 +16,11 @@ export interface SavedViewList {
 
 /** Every list page that supports saved views. Two ACE tabs share /ace. */
 export const SAVED_VIEW_LISTS: readonly SavedViewList[] = [
-  { key: "tasks", basePath: "/tasks", label: "Tasks" },
-  { key: "evidence", basePath: "/evidence", label: "Evidence" },
+  { key: "tasks", basePath: "/command/tasks", label: "Tasks" },
+  { key: "evidence", basePath: "/programs/evidence", label: "Evidence" },
   { key: "mdf", basePath: "/mdf", label: "MDF" },
-  { key: "assessments", basePath: "/assessments", label: "Assessments" },
-  { key: "roadmaps", basePath: "/roadmaps", label: "Roadmaps" },
+  { key: "assessments", basePath: "/plan", label: "Assessments" },
+  { key: "roadmaps", basePath: "/plan/roadmaps", label: "Roadmaps" },
   { key: "reports", basePath: "/reports", label: "Reports" },
   { key: "programs", basePath: "/programs", label: "Programs" },
   { key: "ace:opportunities", basePath: "/ace", label: "ACE opportunities" },

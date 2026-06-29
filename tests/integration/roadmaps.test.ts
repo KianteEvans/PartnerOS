@@ -210,8 +210,8 @@ describe("roadmaps end-to-end", () => {
     ).rejects.toBeInstanceOf(errors.ValidationError);
   });
 
-  it("seeds milestones from an assessment's recommendations", async () => {
-    // Create + submit an assessment with no answers -> all gaps -> several recs.
+  it("seeds milestones from an assessment's gap modules", async () => {
+    // Create + submit an assessment with no answers -> every in-scope module is a gap.
     const created = await gate.runMutation(
       {
         permission: "assessment:create",
@@ -244,14 +244,15 @@ describe("roadmaps end-to-end", () => {
     );
 
     const { withTenant } = db.client;
-    const { assessmentRecommendations, roadmapMilestones } = db.schema;
-    const recs = await withTenant(idA(), (tx) =>
+    const { assessmentModules, roadmapMilestones } = db.schema;
+    const modules = await withTenant(idA(), (tx) =>
       tx
         .select()
-        .from(assessmentRecommendations)
-        .where(eq(assessmentRecommendations.assessmentId, assessmentId)),
+        .from(assessmentModules)
+        .where(eq(assessmentModules.assessmentId, assessmentId)),
     );
-    expect(recs.length).toBeGreaterThan(0);
+    const gapCount = modules.filter((m) => (m.score ?? 0) < 60).length;
+    expect(gapCount).toBeGreaterThan(0);
 
     const res = await run("roadmap:create", "ra-roadmap", (ctx) =>
       ops.createRoadmapOp(ctx, {
@@ -263,13 +264,13 @@ describe("roadmaps end-to-end", () => {
         sourceAssessmentId: assessmentId,
       }),
     );
-    expect(res.body.milestones).toBe(recs.length);
+    expect(res.body.milestones).toBe(gapCount);
 
     const seededMs = await withTenant(idA(), (tx) =>
       tx.select().from(roadmapMilestones).where(eq(roadmapMilestones.roadmapId, res.body.id)),
     );
-    const recTitles = new Set(recs.map((r) => r.title));
-    expect(seededMs.every((m) => recTitles.has(m.title))).toBe(true);
+    expect(seededMs.length).toBeGreaterThan(0);
+    expect(seededMs.every((m) => m.title.startsWith("Reach 75+ in "))).toBe(true);
   });
 
   it("rejects seeding from an assessment with no recommendations", async () => {

@@ -10,6 +10,10 @@ import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge, statusTone } from "@/components/ui/Badge";
+import { Callout } from "@/components/ui/Callout";
+import { BarChart } from "@/components/ui/BarChart";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import {
@@ -24,7 +28,8 @@ import {
   createMdfTask,
 } from "@/domain/mdf/actions";
 import { MDF_STATUS_LABELS, type MdfStatus } from "@/domain/mdf/lifecycle";
-import { preflight, roiMultiple, type MdfLike } from "@/domain/mdf/analytics";
+import { preflight, roiMultiple, deadlineRisk, claimedShare, type MdfLike } from "@/domain/mdf/analytics";
+import { daysBetween } from "@/domain/dates";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -67,8 +72,12 @@ export default async function MdfDetailPage({
   if (!data) notFound();
   const req = data.req;
   const status = req.status as MdfStatus;
+  const today = new Date().toISOString().slice(0, 10);
   const elig = preflight(req as MdfLike);
   const roi = roiMultiple(req as MdfLike);
+  const atRisk = deadlineRisk(req as MdfLike, today);
+  const claimedPct = claimedShare(req as MdfLike);
+  const daysToDeadline = req.claimDeadline ? daysBetween(today, req.claimDeadline) : null;
   const ownerEmail = req.ownerUserId ? data.members.find((m) => m.id === req.ownerUserId)?.email : null;
 
   return (
@@ -113,20 +122,47 @@ export default async function MdfDetailPage({
         }
       />
 
-      <div>
-        <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>
-          {req.activityType} · <Badge tone={statusTone(status)}>{MDF_STATUS_LABELS[status]}</Badge> · Owner {ownerEmail ?? "Unassigned"}
-          {roi !== null ? ` · ROI ${roi}x` : ""}
-        </p>
-        <p style={{ color: "var(--muted)", margin: "8px 0 0", fontSize: 13, display: "flex", gap: 14, flexWrap: "wrap" }}>
-          <span>Requested {money(req.requestedAmount)}</span>
-          <span>Approved {money(req.approvedAmount)}</span>
-          <span>Deployed {money(req.deployedAmount)}</span>
-          <span>Claimed {money(req.claimedAmount)}</span>
-          <span>Reimbursed {money(req.reimbursedAmount)}</span>
-          <span>Pipeline {money(req.expectedPipeline)}</span>
-        </p>
-      </div>
+      {atRisk && daysToDeadline !== null && (
+        <Callout
+          tone={daysToDeadline < 0 ? "danger" : "warn"}
+          title={
+            daysToDeadline < 0
+              ? `Claim deadline passed ${Math.abs(daysToDeadline)} day${Math.abs(daysToDeadline) === 1 ? "" : "s"} ago`
+              : `Claim deadline in ${daysToDeadline} day${daysToDeadline === 1 ? "" : "s"}`
+          }
+        >
+          {req.claimDeadline}. Submit the claim before the funds expire.
+        </Callout>
+      )}
+
+      <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>
+        {req.activityType} · <Badge tone={statusTone(status)}>{MDF_STATUS_LABELS[status]}</Badge> · Owner {ownerEmail ?? "Unassigned"}
+      </p>
+
+      <Panel title="Funding progress">
+        <BarChart
+          max={Math.max(1, req.requestedAmount)}
+          data={[
+            { label: "Requested", value: req.requestedAmount, display: money(req.requestedAmount), color: "var(--info)" },
+            { label: "Approved", value: req.approvedAmount ?? 0, display: money(req.approvedAmount), color: "var(--accent)" },
+            { label: "Deployed", value: req.deployedAmount ?? 0, display: money(req.deployedAmount), color: "var(--accent)" },
+            { label: "Claimed", value: req.claimedAmount ?? 0, display: money(req.claimedAmount), color: "var(--warn)" },
+            { label: "Reimbursed", value: req.reimbursedAmount ?? 0, display: money(req.reimbursedAmount), color: "var(--ok)" },
+          ]}
+        />
+        <div style={{ marginTop: 14 }}>
+          <MetricStrip min={130}>
+            <MetricCard label="ROI multiple" value={roi == null ? "—" : `${roi}x`} tone="accent" />
+            <MetricCard label="% of approved claimed" value={`${claimedPct}%`} />
+            <MetricCard label="Pipeline" value={money(req.expectedPipeline)} />
+            <MetricCard
+              label="Claim deadline"
+              value={daysToDeadline === null ? "—" : daysToDeadline < 0 ? `${Math.abs(daysToDeadline)}d ago` : `${daysToDeadline}d`}
+              tone={atRisk ? "danger" : "neutral"}
+            />
+          </MetricStrip>
+        </div>
+      </Panel>
 
       {status === "draft" && (
         <Panel title="Eligibility preflight">
@@ -144,11 +180,11 @@ export default async function MdfDetailPage({
       <Panel title="Proof & execution">
         <p style={{ fontSize: 13, margin: 0, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <span>
-            Proof: {req.evidenceId ? <Link href="/evidence" style={{ color: "var(--accent)" }}>linked ({data.evidenceStatus})</Link> : <span style={spanStyle}>none</span>}
+            Proof: {req.evidenceId ? <Link href="/programs/evidence" style={{ color: "var(--accent)" }}>linked ({data.evidenceStatus})</Link> : <span style={spanStyle}>none</span>}
           </span>
           {!req.evidenceId && <MutationForm action={stageMdfProof} submitLabel="Stage proof" variant="secondary" hidden={{ requestId: req.id }} />}
           <span>
-            Task: {req.taskId ? <Link href="/tasks" style={{ color: "var(--accent)" }}>created ({data.taskStatus})</Link> : <span style={spanStyle}>none</span>}
+            Task: {req.taskId ? <Link href="/command/tasks" style={{ color: "var(--accent)" }}>created ({data.taskStatus})</Link> : <span style={spanStyle}>none</span>}
           </span>
           {!req.taskId && <MutationForm action={createMdfTask} submitLabel="Create task" variant="secondary" hidden={{ requestId: req.id }} />}
         </p>

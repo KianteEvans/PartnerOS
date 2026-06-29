@@ -183,3 +183,23 @@ describe("recommendCompetencies — adopted + types", () => {
     expect(isRecommendedType("Program")).toBe(false);
   });
 });
+
+describe("recommendCompetencies — objective nudge", () => {
+  it("nudges a goal-aligned program (+8) and adds an 'objective' chip", () => {
+    const base = recommendCompetencies(input({ fits: [fit({ deliveryModel: "Software" })] }))[0]!;
+    const nudged = recommendCompetencies(
+      input({ fits: [fit({ deliveryModel: "Software" })], objectives: ["marketplace"] }),
+    )[0]!;
+    expect(nudged.recommendationScore).toBe(Math.min(100, base.recommendationScore + 8));
+    expect(nudged.rationale.some((c) => c.kind === "objective")).toBe(true);
+  });
+
+  it("does not nudge a non-aligned program, and no objectives is a no-op", () => {
+    const base = recommendCompetencies(input({ fits: [fit({ deliveryModel: "Consulting", fundingFit: "low" })] }))[0]!;
+    const noMatch = recommendCompetencies(
+      input({ fits: [fit({ deliveryModel: "Consulting", fundingFit: "low" })], objectives: ["marketplace"] }),
+    )[0]!;
+    expect(noMatch.recommendationScore).toBe(base.recommendationScore);
+    expect(noMatch.rationale.some((c) => c.kind === "objective")).toBe(false);
+  });
+});

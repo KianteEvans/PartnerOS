@@ -62,6 +62,9 @@ export type Permission =
   | "ace:create"
   | "ace:update"
   | "ace:approve"
+  | "ace_goal:read"
+  | "ace_goal:create"
+  | "ace_goal:update"
   | "report:read"
   | "report:create"
   | "report:update"
@@ -116,6 +119,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "ace:create",
     "ace:update",
     "ace:approve",
+    "ace_goal:read",
+    "ace_goal:create",
+    "ace_goal:update",
     "report:read",
     "report:create",
     "report:update",
@@ -177,6 +183,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "ace:create",
     "ace:update",
     "ace:approve",
+    "ace_goal:read",
+    "ace_goal:create",
+    "ace_goal:update",
     "report:read",
     "report:create",
     "report:update",
@@ -235,6 +244,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "ace:create",
     "ace:update",
     "ace:approve",
+    "ace_goal:read",
+    "ace_goal:create",
+    "ace_goal:update",
     "report:read",
     "report:create",
     "report:update",
@@ -274,6 +286,9 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "ace:read",
     "ace:create",
     "ace:update",
+    "ace_goal:read",
+    "ace_goal:create",
+    "ace_goal:update",
     "report:read",
     "report:create",
     "report:update",
@@ -293,6 +308,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "program:read",
     "tier:read",
     "ace:read",
+    "ace_goal:read",
     "report:read",
     "command:read",
     "settings:read",

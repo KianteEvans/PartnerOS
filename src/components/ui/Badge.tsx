@@ -6,7 +6,9 @@ import type { ReactNode } from "react";
  */
 export type Tone = "neutral" | "accent" | "ok" | "warn" | "danger" | "info";
 
-const TONE_VAR: Record<Tone, string> = {
+/** Tone -> CSS colour var. Reused by Panel accent + Callout so the tone palette
+ *  has a single source of truth. */
+export const TONE_VAR: Record<Tone, string> = {
   neutral: "var(--muted)",
   accent: "var(--accent)",
   ok: "var(--ok)",

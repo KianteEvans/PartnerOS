@@ -1,3 +1,5 @@
+import { addDays } from "@/domain/dates";
+
 /**
  * Pure roadmap progress + overdue rollup. No database, no clock — the caller
  * passes `today`. Drives the detail-page progress header, the timeline's overdue
@@ -5,6 +7,9 @@
  */
 
 export type MilestoneStatusValue = "planned" | "in_progress" | "done" | "blocked";
+
+/** Default look-ahead window for "due soon" milestone warnings. */
+export const MILESTONE_UPCOMING_WINDOW_DAYS = 7;
 
 export interface ProgressMilestone {
   readonly status: MilestoneStatusValue;
@@ -32,6 +37,19 @@ export function isMilestoneOverdue(
   today: string,
 ): boolean {
   return m.status !== "done" && m.targetDate < today;
+}
+
+/**
+ * A milestone is "due soon" when it is not done, not yet overdue, and its target
+ * date falls within the look-ahead window — the early-warning state that precedes
+ * overdue. Mutually exclusive with isMilestoneOverdue.
+ */
+export function isMilestoneUpcoming(
+  m: ProgressMilestone,
+  today: string,
+  windowDays: number = MILESTONE_UPCOMING_WINDOW_DAYS,
+): boolean {
+  return m.status !== "done" && m.targetDate >= today && m.targetDate <= addDays(today, windowDays);
 }
 
 export function roadmapProgress(

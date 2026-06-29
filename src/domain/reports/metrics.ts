@@ -239,3 +239,65 @@ export function narrativeSummary(s: ReportSnapshot, type: ReportType): string {
   ];
   return parts.filter((p) => p.length > 0).join(" ");
 }
+
+export type ReportHealthBand = "strong" | "fair" | "at_risk";
+
+export interface ReportHealthDriver {
+  readonly label: string;
+  readonly score: number;
+}
+
+export interface ReportHealth {
+  readonly score: number;
+  readonly band: ReportHealthBand;
+  readonly drivers: readonly ReportHealthDriver[];
+}
+
+const clampPct = (n: number): number => Math.max(0, Math.min(100, Math.round(n)));
+
+/**
+ * Partnership-health composite derived from a report's OWN frozen snapshot numbers
+ * (so it stays correct for a point-in-time report). Each present section contributes a
+ * 0–100 driver; the score is the average of present drivers. Bands mirror the Command
+ * Center health bands. Works for every existing report — no snapshot change.
+ */
+export function healthFromSnapshot(s: ReportSnapshot): ReportHealth {
+  const drivers: ReportHealthDriver[] = [];
+  if (s.evidence.total > 0) drivers.push({ label: "Evidence", score: clampPct(s.evidence.percent) });
+  if (s.programs.total > 0) drivers.push({ label: "Programs", score: clampPct((s.programs.active / s.programs.total) * 100) });
+  if (s.tier) drivers.push({ label: "Tier", score: clampPct(s.tier.percent) });
+  if (s.tasks.total > 0) drivers.push({ label: "Tasks", score: s.tasks.open > 0 ? clampPct((1 - s.tasks.overdue / s.tasks.open) * 100) : 100 });
+  if (s.ace.open > 0) drivers.push({ label: "ACE", score: clampPct((1 - s.ace.atRisk / s.ace.open) * 100) });
+  if (s.mdf.requested > 0) drivers.push({ label: "MDF", score: clampPct((s.mdf.approved / s.mdf.requested) * 100) });
+
+  const score = drivers.length > 0 ? Math.round(drivers.reduce((sum, d) => sum + d.score, 0) / drivers.length) : 0;
+  const band: ReportHealthBand = score >= 70 ? "strong" : score >= 45 ? "fair" : "at_risk";
+  return { score, band, drivers };
+}
+
+export interface KpiDelta {
+  readonly label: string;
+  readonly current: number;
+  readonly prior: number | null;
+  readonly delta: number | null;
+  /** When true a NEGATIVE delta is good (e.g. fewer overdue tasks). */
+  readonly invert: boolean;
+}
+
+/** Period-over-period change of the headline KPIs vs the previously generated report. */
+export function snapshotDelta(cur: ReportSnapshot, prior: ReportSnapshot | null): KpiDelta[] {
+  const pick = (label: string, get: (s: ReportSnapshot) => number, invert = false): KpiDelta => {
+    const current = get(cur);
+    const p = prior ? get(prior) : null;
+    return { label, current, prior: p, delta: p === null ? null : current - p, invert };
+  };
+  return [
+    pick("MDF approved", (s) => s.mdf.approved),
+    pick("ACE open pipeline", (s) => s.ace.openValue),
+    pick("ACE won", (s) => s.ace.wonValue),
+    pick("Evidence %", (s) => s.evidence.percent),
+    pick("Active programs", (s) => s.programs.active),
+    pick("Tier %", (s) => (s.tier ? s.tier.percent : 0)),
+    pick("Overdue tasks", (s) => s.tasks.overdue, true),
+  ];
+}

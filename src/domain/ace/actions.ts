@@ -165,7 +165,7 @@ export async function approveRouting(
     return failure(err);
   }
   revalidatePath("/ace");
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }
 

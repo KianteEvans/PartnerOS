@@ -87,3 +87,38 @@ export function advancementPlan(
       .sort((a, b) => a.key.localeCompare(b.key));
   return { phase30: byPhase(30), phase60: byPhase(60), phase90: byPhase(90) };
 }
+
+export interface CoverageItem {
+  readonly met: boolean;
+  readonly hasTask: boolean;
+  readonly hasEvidence: boolean;
+}
+
+export interface Coverage {
+  readonly total: number;
+  readonly met: number;
+  /** Unmet requirements (the open gaps). */
+  readonly open: number;
+  /** Open gaps that have a task. */
+  readonly withTask: number;
+  /** Open gaps that have evidence staged. */
+  readonly withEvidence: number;
+  /** Open gaps with a task OR evidence — i.e. work is underway. */
+  readonly actioned: number;
+}
+
+/**
+ * How much of the remaining work is already actioned: of the open gaps, how many
+ * have a task and/or evidence attached. Surfaces "what still needs an owner".
+ */
+export function coverage(items: readonly CoverageItem[]): Coverage {
+  const open = items.filter((i) => !i.met);
+  return {
+    total: items.length,
+    met: items.length - open.length,
+    open: open.length,
+    withTask: open.filter((i) => i.hasTask).length,
+    withEvidence: open.filter((i) => i.hasEvidence).length,
+    actioned: open.filter((i) => i.hasTask || i.hasEvidence).length,
+  };
+}

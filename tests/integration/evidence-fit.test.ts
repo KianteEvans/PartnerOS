@@ -179,3 +179,45 @@ describe("evidence program-fit", () => {
     expect(view.adoptedKeys.size).toBe(0);
   });
 });
+
+describe("case studies as fit evidence", () => {
+  const tenantC = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+  let ownerC = "";
+  const idC = () => identity(tenantC, ownerC);
+
+  beforeAll(async () => {
+    const { withSystem } = db.client;
+    const { tenants, users, caseStudies } = db.schema;
+    await withSystem(async (tx) => {
+      await tx.insert(tenants).values({ id: tenantC, name: "Initech", slug: "initech" });
+      const [u] = await tx
+        .insert(users)
+        .values({ tenantId: tenantC, oidcSubject: "owner-c", email: "owner@initech.test", role: "owner" })
+        .returning({ id: users.id });
+      ownerC = u!.id;
+      // One fully-drafted case study (all five aspects) + one half-drafted: only the
+      // complete one is real, reusable proof, so only it should credit coverage.
+      await tx.insert(caseStudies).values([
+        { tenantId: tenantC, title: "Complete", aboutCustomer: "a", challenge: "b", goals: "c", solution: "d", outcomes: "e" },
+        { tenantId: tenantC, title: "Draft", aboutCustomer: "a", challenge: "", goals: "", solution: "", outcomes: "" },
+      ]);
+    });
+  }, 120_000);
+
+  it("credits a complete case study as approved case_study evidence (gates incomplete)", async () => {
+    const { withTenant } = db.client;
+    const signals = await withTenant(idC(), (tx) => fitLoad.selectFitSignals(tx, tenantC));
+    const caseSignals = signals.filter((s) => s.evidenceType === "case_study");
+    expect(caseSignals).toHaveLength(1); // only the fully-drafted one
+    expect(caseSignals[0]!.status).toBe("approved");
+
+    // The case study alone meets a program's customer-reference requirement; the rest stay gaps.
+    const view = await fitLoad.loadProgramFit(idC(), TODAY);
+    expect(view.hasEvidence).toBe(true);
+    const security = view.fits.find((f) => f.programKey === "security_competency")!;
+    const caseReq = security.requirements.find((r) => r.expectedEvidenceType === "case_study")!;
+    expect(caseReq.state).toBe("met");
+    const others = security.requirements.filter((r) => r.expectedEvidenceType !== "case_study");
+    expect(others.every((r) => r.state === "gap")).toBe(true);
+  });
+});

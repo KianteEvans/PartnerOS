@@ -8,19 +8,11 @@ import { TOGGLE_NAV_EVENT } from "@/components/ui/TopBar";
 import {
   IconHome,
   IconCommand,
-  IconOnboarding,
-  IconAssessments,
   IconRoadmaps,
   IconPrograms,
-  IconTiers,
   IconAce,
   IconMdf,
-  IconEvidence,
-  IconApplications,
-  IconSolutions,
-  IconCaseStudies,
   IconReports,
-  IconTasks,
   IconSettings,
   IconChevron,
   type IconProps,
@@ -51,19 +43,13 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
   {
     label: "Plan",
     items: [
-      { href: "/onboarding", label: "Onboarding", Icon: IconOnboarding },
-      { href: "/assessments", label: "Assessments", Icon: IconAssessments },
-      { href: "/roadmaps", label: "Roadmaps", Icon: IconRoadmaps },
-      { href: "/tiers", label: "Tiers", Icon: IconTiers },
+      { href: "/plan", label: "Planning", Icon: IconRoadmaps },
     ],
   },
   {
     label: "Build & comply",
     items: [
-      { href: "/programs", label: "Programs", Icon: IconPrograms },
-      { href: "/applications", label: "Applications", Icon: IconApplications },
-      { href: "/solutions", label: "Solutions", Icon: IconSolutions },
-      { href: "/evidence", label: "Evidence", Icon: IconEvidence },
+      { href: "/programs", label: "Program Management", Icon: IconPrograms },
     ],
   },
   {
@@ -76,14 +62,12 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
   {
     label: "Insights",
     items: [
-      { href: "/case-studies", label: "Case Studies", Icon: IconCaseStudies },
       { href: "/reports", label: "Reports", Icon: IconReports },
     ],
   },
   {
     label: "System",
     items: [
-      { href: "/tasks", label: "Tasks", Icon: IconTasks },
       { href: "/settings", label: "Settings", Icon: IconSettings },
     ],
   },
@@ -257,11 +241,11 @@ export function Sidebar({ email }: { email: string }): ReactNode {
                       textDecoration: "none",
                       fontSize: 13.5,
                       fontWeight: active ? 600 : 500,
-                      color: active ? "var(--accent)" : "var(--muted)",
+                      color: active ? "var(--section-accent)" : "var(--muted)",
                       background: active
-                        ? "color-mix(in srgb, var(--accent) 14%, transparent)"
+                        ? "color-mix(in srgb, var(--section-accent) 14%, transparent)"
                         : "transparent",
-                      borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent",
+                      borderLeft: active ? "2px solid var(--section-accent)" : "2px solid transparent",
                     }}
                   >
                     <Icon size={18} />

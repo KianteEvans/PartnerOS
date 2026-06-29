@@ -251,7 +251,7 @@ export async function stageMdfProof(
     return failure(err);
   }
   revalidatePath(`/mdf/${requestId}`);
-  revalidatePath("/evidence");
+  revalidatePath("/programs/evidence");
   return { ok: true };
 }
 
@@ -275,6 +275,6 @@ export async function createMdfTask(
     return failure(err);
   }
   revalidatePath(`/mdf/${requestId}`);
-  revalidatePath("/tasks");
+  revalidatePath("/command/tasks");
   return { ok: true };
 }

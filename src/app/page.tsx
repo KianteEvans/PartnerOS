@@ -11,9 +11,10 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
+import { ActivityList } from "@/components/ui/ActivityList";
 import { MetricCard, type MetricTrend } from "@/components/ui/MetricCard";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { ButtonLink } from "@/components/ui/Button";
+import { MarketingHome } from "@/components/marketing/MarketingHome";
 import {
   IconOnboarding,
   IconAssessments,
@@ -27,6 +28,10 @@ import { buildCommandCenter } from "@/domain/command/aggregate";
 import { loadHubTrends, captureMetricSnapshot } from "@/domain/command/trends-load";
 import { trendDelta } from "@/domain/trend";
 import type { Decision } from "@/domain/command/brief";
+import { progressPercent, stepIndex, WIZARD_STEPS, type OnboardingStepId } from "@/domain/onboarding/catalog";
+import { loadActivation } from "@/domain/onboarding/activation-load";
+import { activationChecklist } from "@/domain/onboarding/activation";
+import { HomeActivation } from "@/app/HomeActivation";
 
 function mkTrend(
   series: number[],
@@ -50,20 +55,7 @@ const BAND_LABEL: Record<string, string> = { strong: "Strong", fair: "Fair", at_
 export default async function HomePage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) {
-    return (
-      <PageShell width={560}>
-        <Panel title="Sign in">
-          <p style={{ color: "var(--muted)", marginTop: 0 }}>
-            PartnerOS — AWS partner readiness, MDF, compliance, and ROI in one workspace.
-          </p>
-          <div style={{ marginTop: 14 }}>
-            <ButtonLink href="/api/auth/login" external>
-              Sign in with OIDC
-            </ButtonLink>
-          </div>
-        </Panel>
-      </PageShell>
-    );
+    return <MarketingHome />;
   }
   return <SignedIn identity={identity} />;
 }
@@ -76,27 +68,46 @@ async function SignedIn({
   const today = new Date().toISOString().slice(0, 10);
   const canReceipts = can(identity.role, "audit:read");
 
-  const { tenant, onboardingComplete } = await withTenant(identity, async (tx) => {
+  const { tenant, onboardingComplete, onboardingStep } = await withTenant(identity, async (tx) => {
     const [tenant] = await tx.select().from(tenants).where(eq(tenants.id, identity.tenantId));
     const [ob] = await tx
-      .select({ status: onboarding.status })
+      .select({ status: onboarding.status, step: onboarding.step })
       .from(onboarding)
       .where(eq(onboarding.tenantId, identity.tenantId));
-    return { tenant, onboardingComplete: ob?.status === "completed" };
+    return {
+      tenant,
+      onboardingComplete: ob?.status === "completed",
+      onboardingStep: (ob?.step ?? null) as OnboardingStepId | null,
+    };
   });
 
-  // First-run: a focused onboarding screen instead of the full hub.
+  // First-run: a focused onboarding screen instead of the full hub — now with the
+  // partner's real progress + a Resume button so they can pick up where they left off.
   if (!onboardingComplete) {
+    const step: OnboardingStepId = onboardingStep ?? "context";
+    const started = onboardingStep !== null;
+    const pct = progressPercent(step);
     return (
       <PageShell width={720}>
         <PageHeader title={`Welcome${tenant?.name ? ` to ${tenant.name}` : ""}`} />
         <Panel>
-          <EmptyState
-            icon={<IconOnboarding size={30} />}
-            title="Finish setting up your workspace"
-            hint="Complete onboarding to unlock PartnerOS — we'll seed a starter readiness assessment and your first tasks."
-            action={<ButtonLink href="/onboarding">Continue onboarding</ButtonLink>}
-          />
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
+            <RingGauge value={pct} max={100} size={96} caption="set up" />
+            <div style={{ flex: 1, minWidth: 260, display: "grid", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                <IconOnboarding size={20} />
+                <h2 style={{ margin: 0, fontSize: 16 }}>Finish setting up your workspace</h2>
+              </div>
+              <p style={{ margin: 0, color: "var(--muted)", fontSize: 13.5, lineHeight: 1.5 }}>
+                {started
+                  ? `Step ${stepIndex(step) + 1} of ${WIZARD_STEPS.length} · ${pct}% complete. We'll seed a starter readiness assessment, kickoff tasks, and a roadmap tailored to your goals.`
+                  : "A quick 4-step setup that seeds a starter readiness assessment, kickoff tasks, and a roadmap tailored to your goals."}
+              </p>
+              <div style={{ marginTop: 4 }}>
+                <ButtonLink href="/onboarding">{started ? "Resume onboarding" : "Start onboarding"}</ButtonLink>
+              </div>
+            </div>
+          </div>
         </Panel>
       </PageShell>
     );
@@ -123,6 +134,11 @@ async function SignedIn({
   const ownerName = (id: string | null): string => (id ? emailById.get(id) ?? "—" : "Unassigned");
   const decisions = cc.decisions.slice(0, 5);
 
+  // "Getting started" activation checklist — guides newly-onboarded partners to
+  // first value; retires itself once every item is done.
+  const { answers, counts } = await loadActivation(identity);
+  const activation = activationChecklist(answers, counts);
+
   const quickActions: ReadonlyArray<{
     perm: Permission;
     href: string;
@@ -130,10 +146,10 @@ async function SignedIn({
     hint: string;
     Icon: (p: IconProps) => ReactNode;
   }> = [
-    { perm: "assessment:create", href: "/assessments/new", label: "New assessment", hint: "Readiness or GTM", Icon: IconAssessments },
-    { perm: "roadmap:create", href: "/roadmaps/new", label: "New roadmap", hint: "Compose from catalog", Icon: IconRoadmaps },
+    { perm: "assessment:create", href: "/plan/new", label: "New assessment", hint: "Readiness or GTM", Icon: IconAssessments },
+    { perm: "roadmap:create", href: "/plan/roadmaps/new", label: "New roadmap", hint: "Compose from catalog", Icon: IconRoadmaps },
     { perm: "mdf:create", href: "/mdf", label: "Request MDF", hint: "Start a funding claim", Icon: IconMdf },
-    { perm: "task:create", href: "/tasks", label: "New task", hint: "Assign to your team", Icon: IconTasks },
+    { perm: "task:create", href: "/command/tasks", label: "New task", hint: "Assign to your team", Icon: IconTasks },
   ];
   const actions = quickActions.filter((q) => can(identity.role, q.perm));
 
@@ -206,6 +222,9 @@ async function SignedIn({
           />
         </div>
       </section>
+
+      {/* Getting started — shown only until the partner is activated */}
+      {!activation.complete && <HomeActivation activation={activation} />}
 
       {/* Needs attention — the same decisions the notification bell shows */}
       <Panel
@@ -280,28 +299,14 @@ async function SignedIn({
       {/* Recent activity (audit ledger) */}
       {canReceipts && data.receipts.length > 0 && (
         <Panel title="Recent activity">
-          <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
-            {data.receipts.slice(0, 6).map((r, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  color: "var(--muted)",
-                  borderBottom: "1px solid var(--border)",
-                  paddingBottom: 4,
-                }}
-              >
-                <span>
-                  <strong style={{ color: "var(--text)", fontWeight: 600 }}>{r.action}</strong> · {r.resourceType}
-                </span>
-                <span style={{ whiteSpace: "nowrap" }}>
-                  {ownerName(r.actorUserId)} · {r.createdAt.toISOString().slice(0, 10)}
-                </span>
-              </div>
-            ))}
-          </div>
+          <ActivityList
+            items={data.receipts.slice(0, 6).map((r) => ({
+              action: r.action,
+              resourceType: r.resourceType,
+              actor: ownerName(r.actorUserId),
+              at: r.createdAt,
+            }))}
+          />
         </Panel>
       )}
     </PageShell>

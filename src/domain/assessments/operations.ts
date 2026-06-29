@@ -275,3 +275,41 @@ export async function reviewRecommendationOp(
   }
   return { id: input.recommendationId, taskId, evidenceId };
 }
+
+/**
+ * Approve every still-pending recommendation on an assessment in one gate
+ * transaction — the common "accept this whole assessment's suggestions" flow.
+ * Reuses reviewRecommendationOp per row so each approval gets the same
+ * task/evidence handoffs; one audit row covers the batch.
+ */
+export async function approveAllRecommendationsOp(
+  ctx: MutationContext,
+  input: { readonly assessmentId: string },
+): Promise<{ approved: number }> {
+  const { identity, tx } = ctx;
+  const [a] = await tx
+    .select({ id: assessments.id })
+    .from(assessments)
+    .where(
+      and(
+        eq(assessments.id, input.assessmentId),
+        eq(assessments.tenantId, identity.tenantId),
+      ),
+    );
+  if (!a) throw new ValidationError("Assessment not found");
+
+  const pending = await tx
+    .select({ id: assessmentRecommendations.id })
+    .from(assessmentRecommendations)
+    .where(
+      and(
+        eq(assessmentRecommendations.assessmentId, input.assessmentId),
+        eq(assessmentRecommendations.tenantId, identity.tenantId),
+        eq(assessmentRecommendations.status, "pending"),
+      ),
+    );
+  for (const r of pending) {
+    await reviewRecommendationOp(ctx, { recommendationId: r.id, decision: "approved" });
+  }
+  return { approved: pending.length };
+}

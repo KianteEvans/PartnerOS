@@ -1,15 +1,24 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { getServerIdentity } from "@/auth/session";
 import { requirePermission } from "@/authz/permissions";
 import { withTenant } from "@/db/client";
 import { reports } from "@/db/schema";
-import { canExport, type ReportSnapshot, type ReportStatus } from "@/domain/reports/metrics";
+import {
+  canExport,
+  healthFromSnapshot,
+  snapshotDelta,
+  type ReportHealth,
+  type KpiDelta,
+  type ReportSnapshot,
+  type ReportStatus,
+} from "@/domain/reports/metrics";
 import { AppError } from "@/http/errors";
 
 /**
  * Report export. The snapshot is point-in-time data, so it can only be exported
  * once the report is approved. ?format=json (default) or csv. Read-only,
- * tenant-scoped via RLS.
+ * tenant-scoped via RLS. Includes the derived partnership-health composite and the
+ * period-over-period change vs the immediately-prior report.
  */
 export async function GET(
   req: Request,
@@ -21,19 +30,42 @@ export async function GET(
     requirePermission(identity, "report:read");
     const format = new URL(req.url).searchParams.get("format") === "csv" ? "csv" : "json";
 
-    const [report] = await withTenant(identity, (tx) =>
-      tx
-        .select({ title: reports.title, status: reports.status, summary: reports.summary, snapshot: reports.snapshot })
+    const data = await withTenant(identity, async (tx) => {
+      const [report] = await tx
+        .select({
+          title: reports.title,
+          status: reports.status,
+          summary: reports.summary,
+          snapshot: reports.snapshot,
+          createdAt: reports.createdAt,
+        })
         .from(reports)
-        .where(and(eq(reports.id, id), eq(reports.tenantId, identity.tenantId))),
-    );
-    if (!report) return new Response("Not found", { status: 404 });
+        .where(and(eq(reports.id, id), eq(reports.tenantId, identity.tenantId)));
+      if (!report) return null;
+      const [prior] = await tx
+        .select({ snapshot: reports.snapshot })
+        .from(reports)
+        .where(and(eq(reports.tenantId, identity.tenantId), lt(reports.createdAt, report.createdAt)))
+        .orderBy(desc(reports.createdAt))
+        .limit(1);
+      return { report, prior: (prior?.snapshot as ReportSnapshot | undefined) ?? null };
+    });
+    if (!data) return new Response("Not found", { status: 404 });
+
+    const { report } = data;
     if (!canExport(report.status as ReportStatus)) {
       return new Response("Report must be approved before export", { status: 409 });
     }
+    const snapshot = report.snapshot as ReportSnapshot;
+    const health = healthFromSnapshot(snapshot);
+    const delta = snapshotDelta(snapshot, data.prior);
 
     if (format === "json") {
-      const body = JSON.stringify({ title: report.title, summary: report.summary, snapshot: report.snapshot }, null, 2);
+      const body = JSON.stringify(
+        { title: report.title, summary: report.summary, health, snapshot, delta },
+        null,
+        2,
+      );
       return new Response(body, {
         status: 200,
         headers: {
@@ -44,7 +76,7 @@ export async function GET(
       });
     }
 
-    const csv = snapshotToCsv(report.snapshot as ReportSnapshot);
+    const csv = snapshotToCsv(snapshot, health, delta);
     return new Response(csv, {
       status: 200,
       headers: {
@@ -59,25 +91,71 @@ export async function GET(
   }
 }
 
-/** Flatten the snapshot to section,metric,value rows. */
-function snapshotToCsv(s: ReportSnapshot): string {
+const money = (n: number): string => `$${n.toLocaleString()}`;
+
+/** Flatten the snapshot to section,metric,value rows with human labels, plus the
+ *  partnership-health composite and a change-vs-previous block. */
+function snapshotToCsv(s: ReportSnapshot, health: ReportHealth, delta: KpiDelta[]): string {
   const lines = ["section,metric,value"];
-  const push = (section: string, obj: Record<string, unknown> | null) => {
-    if (!obj) {
-      lines.push([section, "plan", "none"].map(cell).join(","));
-      return;
+  const row = (section: string, metric: string, value: string) =>
+    lines.push([section, metric, value].map(cell).join(","));
+
+  row("Partnership health", "Score", `${health.score}/100`);
+  row("Partnership health", "Band", health.band.replace("_", " "));
+  for (const d of health.drivers) row("Partnership health", d.label, `${d.score}/100`);
+
+  row("MDF", "Requested", money(s.mdf.requested));
+  row("MDF", "Approved", money(s.mdf.approved));
+  row("MDF", "Claimed", money(s.mdf.claimed));
+  row("MDF", "Reimbursed", money(s.mdf.reimbursed));
+  row("MDF", "Remaining", money(s.mdf.remaining));
+  row("MDF", "Expected pipeline", money(s.mdf.pipeline));
+  row("MDF", "ROI", s.mdf.roi == null ? "" : `${s.mdf.roi}x`);
+  row("MDF", "Deadline risks", String(s.mdf.deadlineRisks));
+
+  row("ACE", "Open opportunities", String(s.ace.open));
+  row("ACE", "Open value", money(s.ace.openValue));
+  row("ACE", "Won", String(s.ace.won));
+  row("ACE", "Won value", money(s.ace.wonValue));
+  row("ACE", "At risk", String(s.ace.atRisk));
+  row("ACE", "Unrouted", String(s.ace.unrouted));
+
+  row("Evidence", "Total", String(s.evidence.total));
+  row("Evidence", "Approved", String(s.evidence.approved));
+  row("Evidence", "Missing", String(s.evidence.missing));
+  row("Evidence", "% approved", `${s.evidence.percent}%`);
+
+  row("Programs", "Total", String(s.programs.total));
+  row("Programs", "Active", String(s.programs.active));
+  row("Programs", "In progress", String(s.programs.pending));
+  row("Programs", "Expired", String(s.programs.expired));
+
+  if (s.tier) {
+    row("Tier", "Current", s.tier.current);
+    row("Tier", "Target", s.tier.target);
+    row("Tier", "Status", s.tier.status);
+    row("Tier", "Requirements met", `${s.tier.met}/${s.tier.total}`);
+    row("Tier", "% to target", `${s.tier.percent}%`);
+  } else {
+    row("Tier", "Plan", "None");
+  }
+
+  row("Tasks", "Total", String(s.tasks.total));
+  row("Tasks", "Open", String(s.tasks.open));
+  row("Tasks", "Done", String(s.tasks.done));
+  row("Tasks", "Overdue", String(s.tasks.overdue));
+
+  row("Assessments", "Count", String(s.assessments.count));
+  row("Assessments", "Scored", String(s.assessments.scored));
+  row("Assessments", "Latest score", s.assessments.latestScore == null ? "" : `${s.assessments.latestScore}/100`);
+
+  if (delta.some((d) => d.prior !== null)) {
+    for (const d of delta) {
+      const change = d.delta === null ? "" : d.delta > 0 ? `+${d.delta}` : String(d.delta);
+      row("Change vs previous", d.label, change);
     }
-    for (const [k, v] of Object.entries(obj)) {
-      lines.push([section, k, v == null ? "" : v].map(cell).join(","));
-    }
-  };
-  push("mdf", s.mdf);
-  push("ace", s.ace);
-  push("evidence", s.evidence);
-  push("programs", s.programs);
-  push("tier", s.tier as Record<string, unknown> | null);
-  push("tasks", s.tasks);
-  push("assessments", s.assessments);
+  }
+
   return lines.join("\r\n");
 }
 

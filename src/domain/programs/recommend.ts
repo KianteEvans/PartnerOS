@@ -75,9 +75,22 @@ export interface RecommendInput {
   readonly profile: RecommendProfile;
   readonly readiness: RecommendReadiness;
   readonly adoptedKeys: ReadonlySet<string>;
+  /** Onboarding objectives — a small, explainable nudge toward goal-aligned programs. */
+  readonly objectives?: readonly string[] | undefined;
 }
 
-export type RationaleKind = "evidence" | "business_model" | "readiness" | "target" | "funding";
+/** A bounded boost applied once when a program aligns with a stated onboarding goal. */
+export const OBJECTIVE_NUDGE = 8;
+
+/** Objective key -> (human goal label, alignment predicate over a program's fit).
+ *  Deliberately a single nudge per program so a multi-goal partner can't stack it. */
+const OBJECTIVE_ALIGN: Record<string, { label: string; match: (fit: ProgramFit) => boolean }> = {
+  competency: { label: "earn a Competency", match: (f) => isRecommendedType(f.programType) },
+  marketplace: { label: "grow AWS Marketplace", match: (f) => norm(f.deliveryModel) === "software" },
+  cosell: { label: "build co-sell pipeline", match: (f) => norm(f.fundingFit) === "high" },
+};
+
+export type RationaleKind = "evidence" | "business_model" | "readiness" | "target" | "funding" | "objective";
 export type RationaleTone = "ok" | "warn" | "info" | "neutral";
 
 export interface RationaleChip {
@@ -205,6 +218,17 @@ export function recommendCompetencies(input: RecommendInput): CompetencyRecommen
       Math.round((wCov * coverageTerm + wBus * businessModelTerm + wRead * (readinessTerm ?? 0)) / W),
     );
 
+    // A single bounded nudge when the program aligns with a declared onboarding goal.
+    let objectiveLabel: string | null = null;
+    for (const o of input.objectives ?? []) {
+      const align = OBJECTIVE_ALIGN[o];
+      if (align && align.match(fit)) {
+        objectiveLabel = align.label;
+        break;
+      }
+    }
+    const finalScore = objectiveLabel ? clamp(score + OBJECTIVE_NUDGE) : score;
+
     // Rationale chips (honest about missing inputs).
     const rationale: RationaleChip[] = [];
     rationale.push(
@@ -241,6 +265,9 @@ export function recommendCompetencies(input: RecommendInput): CompetencyRecommen
     if (norm(fit.fundingFit) === "high") {
       rationale.push({ kind: "funding", label: "High funding fit", detail: "AWS funding likely supports this", tone: "info" });
     }
+    if (objectiveLabel) {
+      rationale.push({ kind: "objective", label: "Supports your goal", detail: `Aligned with your goal to ${objectiveLabel}`, tone: "info" });
+    }
 
     return {
       programKey: fit.programKey,
@@ -248,8 +275,8 @@ export function recommendCompetencies(input: RecommendInput): CompetencyRecommen
       programType: fit.programType,
       deliveryModel: fit.deliveryModel,
       fundingFit: fit.fundingFit,
-      recommendationScore: score,
-      band: fitBand(score),
+      recommendationScore: finalScore,
+      band: fitBand(finalScore),
       coveragePercent: coverageTerm,
       evidenceFitScore: fit.fitScore,
       declaredLean,

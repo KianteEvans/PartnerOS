@@ -26,10 +26,13 @@ export function DeltaChip({
   delta,
   suffix = "",
   invert = false,
+  pulse = false,
 }: {
   delta: number;
   suffix?: string | undefined;
   invert?: boolean | undefined;
+  /** Opt-in one-shot pulse to draw the eye to a notable swing (reduced-motion safe). */
+  pulse?: boolean | undefined;
 }): ReactNode {
   if (delta === 0) {
     return <span style={chipStyle("var(--muted)")}>±0{suffix}</span>;
@@ -38,7 +41,7 @@ export function DeltaChip({
   const good = invert ? !up : up;
   const color = good ? "var(--ok)" : "var(--danger)";
   return (
-    <span style={chipStyle(color)}>
+    <span style={chipStyle(color)} className={pulse ? "pos-delta-pulse" : undefined}>
       {up ? "▲" : "▼"} {up ? "+" : ""}
       {delta}
       {suffix}
