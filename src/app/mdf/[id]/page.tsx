@@ -30,7 +30,18 @@ import {
 import { MDF_STATUS_LABELS, type MdfStatus } from "@/domain/mdf/lifecycle";
 import { preflight, roiMultiple, deadlineRisk, claimedShare, type MdfLike } from "@/domain/mdf/analytics";
 import { daysBetween } from "@/domain/dates";
+import { MdfLifecycleStepper } from "@/app/mdf/MdfLifecycleStepper";
+import { activityByKey, APPROVED_ACTIVITIES, INELIGIBLE_ACTIVITIES } from "@/domain/mdf/activity-catalog";
+import { coFunding, derivedDeadlines, complianceChecks } from "@/domain/mdf/compliance";
 
+const SECTION = "var(--section-accent)";
+const ACTIVITY_LABELS: Record<string, string> = {
+  event: "Event",
+  campaign: "Campaign",
+  content: "Content",
+  enablement: "Enablement",
+  other: "Other",
+};
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
 const controlStyle = {
@@ -117,6 +128,19 @@ export default async function MdfDetailPage({
               <label style={labelStyle}><span style={spanStyle}>End</span><input name="endDate" type="date" defaultValue={req.endDate ?? ""} style={controlStyle} /></label>
               <label style={labelStyle}><span style={spanStyle}>Claim by</span><input name="claimDeadline" type="date" defaultValue={req.claimDeadline ?? ""} style={controlStyle} /></label>
               <label style={labelStyle}><span style={spanStyle}>Opportunity</span><input name="opportunityRef" maxLength={200} defaultValue={req.opportunityRef ?? ""} style={controlStyle} /></label>
+              <label style={labelStyle}>
+                <span style={spanStyle}>AWS activity</span>
+                <select name="catalogKey" defaultValue={req.catalogKey ?? ""} style={controlStyle}>
+                  <option value="">— None —</option>
+                  <optgroup label="Approved">
+                    {APPROVED_ACTIVITIES.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+                  </optgroup>
+                  <optgroup label="Ineligible (blocks submission)">
+                    {INELIGIBLE_ACTIVITIES.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+                  </optgroup>
+                </select>
+              </label>
+              <label style={labelStyle}><span style={spanStyle}>Total cost ($)</span><input name="totalCost" type="number" min={0} defaultValue={req.totalCost ?? ""} style={controlStyle} /></label>
             </FormDrawer>
           ) : undefined
         }
@@ -135,11 +159,18 @@ export default async function MdfDetailPage({
         </Callout>
       )}
 
-      <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>
-        {req.activityType} · <Badge tone={statusTone(status)}>{MDF_STATUS_LABELS[status]}</Badge> · Owner {ownerEmail ?? "Unassigned"}
+      <p style={{ color: "var(--muted)", margin: 0, fontSize: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Badge tone="info">{ACTIVITY_LABELS[req.activityType] ?? req.activityType}</Badge> ·{" "}
+        <Badge tone={statusTone(status)}>{MDF_STATUS_LABELS[status]}</Badge> · Owner {ownerEmail ?? "Unassigned"}
       </p>
 
-      <Panel title="Funding progress">
+      <Panel title="Lifecycle stage" accent={SECTION}>
+        <MdfLifecycleStepper status={status} />
+      </Panel>
+
+      {req.catalogKey ? <AwsCompliancePanel req={req} today={today} /> : null}
+
+      <Panel title="Funding progress" accent={SECTION}>
         <BarChart
           max={Math.max(1, req.requestedAmount)}
           data={[
@@ -191,7 +222,7 @@ export default async function MdfDetailPage({
       </Panel>
 
       {/* Lifecycle workbench */}
-      <Panel title="Lifecycle">
+      <Panel title="Lifecycle" accent={SECTION}>
         <LifecycleControls req={req} status={status} eligible={elig.eligible} canApprove={canApprove} />
       </Panel>
 
@@ -199,6 +230,66 @@ export default async function MdfDetailPage({
         <p style={{ color: "var(--muted)", fontSize: 13 }}>Review notes: {req.reviewNotes}</p>
       )}
     </PageShell>
+  );
+}
+
+/** AWS compliance for a catalog-grounded request: eligibility, co-fund, deadlines, flags. */
+function AwsCompliancePanel({
+  req,
+  today,
+}: {
+  req: typeof mdfRequests.$inferSelect;
+  today: string;
+}): ReactNode {
+  const activity = activityByKey(req.catalogKey);
+  const total = req.totalCost ?? req.requestedAmount;
+  const co = coFunding(total, 50);
+  const deadlines = derivedDeadlines(req.startDate, req.endDate);
+  const checks = complianceChecks(
+    {
+      catalogKey: req.catalogKey,
+      startDate: req.startDate,
+      endDate: req.endDate,
+      totalCost: total,
+      coFundPct: 50,
+      brandingConfirmed: req.awsBrandingConfirmed,
+    },
+    today,
+  );
+  const flags = checks.filter((c) => c.severity !== "ok");
+  const blocked = checks.some((c) => c.severity === "block");
+  return (
+    <Panel title="AWS compliance" accent={SECTION}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        {activity ? (
+          <Badge tone={activity.eligibility === "approved" ? "ok" : "danger"}>{activity.label}</Badge>
+        ) : null}
+        <Badge tone={blocked ? "danger" : "ok"}>{blocked ? "Blocked by AWS rules" : "Clears AWS rules"}</Badge>
+      </div>
+      {activity?.reason ? <p style={{ fontSize: 12.5, color: "var(--danger)", margin: "0 0 8px" }}>{activity.reason}</p> : null}
+      {activity?.proofRequirement ? (
+        <p style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 0 10px" }}>Proof at claim: {activity.proofRequirement}</p>
+      ) : null}
+      <MetricStrip min={120}>
+        <MetricCard label="Total cost" value={money(total)} />
+        <MetricCard label="AWS ask (50%)" value={money(co.amountToClaim)} tone="accent" />
+        <MetricCard label="Your share" value={money(co.partnerShare)} />
+        <MetricCard label="Submit by" value={deadlines.submitBy ?? "—"} />
+        <MetricCard label="Claim by" value={deadlines.claimBy ?? "—"} />
+      </MetricStrip>
+      {flags.length > 0 && (
+        <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
+          {flags.map((f) => (
+            <div key={f.key} style={{ display: "flex", gap: 8, fontSize: 12.5 }}>
+              <span style={{ color: f.severity === "block" ? "var(--danger)" : "var(--warn)", fontWeight: 700, whiteSpace: "nowrap" }}>
+                {f.severity === "block" ? "Blocked" : "Warning"}
+              </span>
+              <span>{f.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
   );
 }
 

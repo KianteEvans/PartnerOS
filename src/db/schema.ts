@@ -1183,6 +1183,11 @@ export const mdfRequests = pgTable(
     endDate: date("end_date"),
     claimDeadline: date("claim_deadline"),
     opportunityRef: text("opportunity_ref"),
+    // AWS activity-catalog grounding (drizzle/0036): the chosen catalog activity,
+    // the full activity cost (requestedAmount is the AWS ask), and a branding ack.
+    catalogKey: text("catalog_key"),
+    totalCost: integer("total_cost"),
+    awsBrandingConfirmed: boolean("aws_branding_confirmed").notNull().default(false),
     evidenceId: uuid("evidence_id").references(() => evidence.id, {
       onDelete: "set null",
     }),
@@ -1204,6 +1209,93 @@ export const mdfRequests = pgTable(
     index("mdf_requests_tenant_idx").on(t.tenantId),
     index("mdf_requests_tenant_status_idx").on(t.tenantId, t.status),
   ],
+);
+
+// Per-period MDF budget allocation (drives budget-vs-committed on the overview).
+export const mdfBudgets = pgTable(
+  "mdf_budgets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    periodLabel: text("period_label").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    amount: bigint("amount", { mode: "number" }).notNull().default(0),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mdf_budgets_tenant_idx").on(t.tenantId)],
+);
+
+// Daily MDF portfolio snapshot (materialize-on-read) for hero sparklines/deltas.
+export const mdfSnapshots = pgTable(
+  "mdf_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    capturedOn: date("captured_on").notNull(),
+    approved: bigint("approved", { mode: "number" }).notNull().default(0),
+    deployed: bigint("deployed", { mode: "number" }).notNull().default(0),
+    claimed: bigint("claimed", { mode: "number" }).notNull().default(0),
+    reimbursed: bigint("reimbursed", { mode: "number" }).notNull().default(0),
+    pipeline: bigint("pipeline", { mode: "number" }).notNull().default(0),
+    openCount: integer("open_count").notNull().default(0),
+    deadlineRisks: integer("deadline_risks").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("mdf_snapshots_tenant_day_key").on(t.tenantId, t.capturedOn)],
+);
+
+// MDF marketing event planner (drizzle/0036): a saved plan of candidate events.
+export const mdfEventPlans = pgTable(
+  "mdf_event_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("draft"),
+    notes: text("notes").notNull().default(""),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mdf_event_plans_tenant_idx").on(t.tenantId)],
+);
+
+// Candidate events within a plan; convert links back to the spawned request.
+export const mdfPlanItems = pgTable(
+  "mdf_plan_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => mdfEventPlans.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    catalogKey: text("catalog_key"),
+    activityType: mdfActivityType("activity_type").notNull().default("other"),
+    totalCost: integer("total_cost").notNull().default(0),
+    coFundPct: integer("co_fund_pct").notNull().default(50),
+    expectedPipeline: integer("expected_pipeline").notNull().default(0),
+    expectedOpportunities: integer("expected_opportunities").notNull().default(0),
+    startDate: date("start_date"),
+    endDate: date("end_date"),
+    spmsId: text("spms_id"),
+    requestId: uuid("request_id").references(() => mdfRequests.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("mdf_plan_items_tenant_plan_idx").on(t.tenantId, t.planId)],
 );
 
 // ----------------------------------------------------------------------------

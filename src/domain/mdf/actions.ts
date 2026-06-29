@@ -5,10 +5,13 @@ import { redirect } from "next/navigation";
 import { runMutation } from "@/gate/mutation-gate";
 import { AppError } from "@/http/errors";
 import { parseOrThrow, type ActionState } from "@/domain/forms";
+import { parseBulkIds } from "@/domain/bulk";
 import {
   createRequestSchema,
   requestIdSchema,
   positiveAmount,
+  budgetSchema,
+  budgetIdSchema,
 } from "@/domain/mdf/schemas";
 import {
   createRequestOp,
@@ -21,6 +24,10 @@ import {
   reimburseRequestOp,
   stageProofEvidenceOp,
   createTaskFromRequestOp,
+  bulkApproveMdfOp,
+  bulkRejectMdfOp,
+  createBudgetOp,
+  updateBudgetOp,
 } from "@/domain/mdf/operations";
 
 /**
@@ -60,6 +67,8 @@ export async function createMdfRequest(
       endDate: formData.get("endDate"),
       claimDeadline: formData.get("claimDeadline"),
       opportunityRef: formData.get("opportunityRef"),
+      catalogKey: formData.get("catalogKey"),
+      totalCost: formData.get("totalCost"),
     });
     const res = await runMutation({
       permission: "mdf:create",
@@ -95,6 +104,8 @@ export async function updateMdfRequest(
       endDate: formData.get("endDate"),
       claimDeadline: formData.get("claimDeadline"),
       opportunityRef: formData.get("opportunityRef"),
+      catalogKey: formData.get("catalogKey"),
+      totalCost: formData.get("totalCost"),
     });
     const owner = String(formData.get("ownerUserId") ?? "");
     await runMutation({
@@ -150,7 +161,7 @@ export async function submitMdfRequest(_prev: ActionState, formData: FormData): 
       action: "mdf.submit",
       resourceType: "mdf_request",
       resourceId: () => id,
-      handler: (ctx) => submitRequestOp(ctx, { id }),
+      handler: (ctx) => submitRequestOp(ctx, { id, today: new Date().toISOString().slice(0, 10) }),
     }),
   );
 }
@@ -276,5 +287,97 @@ export async function createMdfTask(
   }
   revalidatePath(`/mdf/${requestId}`);
   revalidatePath("/command/tasks");
+  return { ok: true };
+}
+
+/** Approve every selected `requested` row at its full ask (approver-only). */
+export async function bulkApproveMdf(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const notes = String(formData.get("notes") ?? "").slice(0, 2000);
+    await runMutation({
+      permission: "mdf:approve",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ ids, notes }),
+      action: "mdf.bulk_approve",
+      resourceType: "mdf_request",
+      auditMetadata: { count: ids.length },
+      handler: (ctx) => bulkApproveMdfOp(ctx, { ids, notes }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/mdf");
+  return { ok: true };
+}
+
+/** Reject every selected `requested` row (approver-only). */
+export async function bulkRejectMdf(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const notes = String(formData.get("notes") ?? "").slice(0, 2000);
+    await runMutation({
+      permission: "mdf:approve",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ ids, notes }),
+      action: "mdf.bulk_reject",
+      resourceType: "mdf_request",
+      auditMetadata: { count: ids.length },
+      handler: (ctx) => bulkRejectMdfOp(ctx, { ids, notes }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/mdf");
+  return { ok: true };
+}
+
+export async function createMdfBudget(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const input = parseOrThrow(budgetSchema, {
+      periodLabel: formData.get("periodLabel"),
+      amount: formData.get("amount"),
+      periodStart: formData.get("periodStart"),
+      periodEnd: formData.get("periodEnd"),
+    });
+    await runMutation({
+      permission: "mdf:approve",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "mdf.budget.create",
+      resourceType: "mdf_budget",
+      resourceId: (r: { id: string }) => r.id,
+      auditMetadata: { amount: input.amount },
+      handler: (ctx) => createBudgetOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/mdf");
+  return { ok: true };
+}
+
+export async function updateMdfBudget(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const { budgetId } = parseOrThrow(budgetIdSchema, { budgetId: formData.get("budgetId") });
+    const input = parseOrThrow(budgetSchema, {
+      periodLabel: formData.get("periodLabel"),
+      amount: formData.get("amount"),
+      periodStart: formData.get("periodStart"),
+      periodEnd: formData.get("periodEnd"),
+    });
+    await runMutation({
+      permission: "mdf:approve",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ budgetId, ...input }),
+      action: "mdf.budget.update",
+      resourceType: "mdf_budget",
+      resourceId: () => budgetId,
+      handler: (ctx) => updateBudgetOp(ctx, { id: budgetId, ...input }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/mdf");
   return { ok: true };
 }

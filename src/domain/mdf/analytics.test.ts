@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { allowedNext, canTransition, isOpen } from "@/domain/mdf/lifecycle";
+import { allowedNext, canTransition, isOpen, lifecycleSteps } from "@/domain/mdf/lifecycle";
 import { daysBetween } from "@/domain/dates";
 import {
   preflight,
@@ -9,6 +9,7 @@ import {
   portfolioSummary,
   reimbursementRate,
   claimedShare,
+  summaryByActivity,
   type MdfLike,
 } from "@/domain/mdf/analytics";
 
@@ -117,5 +118,47 @@ describe("daysBetween", () => {
     expect(daysBetween("2026-06-01", "2026-06-08")).toBe(7);
     expect(daysBetween("2026-06-08", "2026-06-01")).toBe(-7);
     expect(daysBetween("2026-06-01", "2026-06-01")).toBe(0);
+  });
+});
+
+describe("lifecycleSteps", () => {
+  it("tags the current stage and marks prior stages done", () => {
+    const steps = lifecycleSteps("deployed");
+    expect(steps.map((s) => s.key)).toEqual([
+      "draft", "requested", "approved", "deployed", "claimed", "reimbursed",
+    ]);
+    expect(steps.find((s) => s.key === "approved")?.state).toBe("done");
+    expect(steps.find((s) => s.key === "deployed")?.state).toBe("current");
+    expect(steps.find((s) => s.key === "claimed")?.state).toBe("upcoming");
+  });
+
+  it("short-circuits a rejected request to a distinct terminal chip", () => {
+    const steps = lifecycleSteps("rejected");
+    expect(steps.map((s) => s.key)).toEqual(["draft", "requested", "rejected"]);
+    expect(steps.at(-1)?.state).toBe("rejected");
+  });
+
+  it("a reimbursed request is fully done", () => {
+    expect(lifecycleSteps("reimbursed").every((s) => s.state === "done" || s.state === "current")).toBe(true);
+    expect(lifecycleSteps("reimbursed").at(-1)?.state).toBe("current");
+  });
+});
+
+describe("summaryByActivity", () => {
+  it("rolls spend up by activity type, sorted by approved, with per-type ROI", () => {
+    const rows: (MdfLike & { activityType: string })[] = [
+      { ...req({ approvedAmount: 10_000, reimbursedAmount: 4_000, expectedPipeline: 50_000 }), activityType: "event" },
+      { ...req({ approvedAmount: 5_000, expectedPipeline: 10_000 }), activityType: "event" },
+      { ...req({ approvedAmount: 20_000, expectedPipeline: 40_000 }), activityType: "campaign" },
+    ];
+    const out = summaryByActivity(rows);
+    expect(out.map((a) => a.activityType)).toEqual(["campaign", "event"]); // campaign approved 20k > event 15k
+    const event = out.find((a) => a.activityType === "event")!;
+    expect(event.count).toBe(2);
+    expect(event.approved).toBe(15_000);
+    expect(event.reimbursed).toBe(4_000);
+    expect(event.pipeline).toBe(60_000);
+    expect(event.roi).toBe(4); // 60k / 15k
+    expect(summaryByActivity([])).toEqual([]);
   });
 });

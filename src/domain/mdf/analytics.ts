@@ -145,3 +145,46 @@ export function portfolioSummary(
     openCount: reqs.filter((r) => isOpen(r.status)).length,
   };
 }
+
+export interface ActivitySummary {
+  readonly activityType: string;
+  readonly count: number;
+  readonly requested: number;
+  readonly approved: number;
+  readonly reimbursed: number;
+  readonly pipeline: number;
+  /** Pipeline per approved dollar for this activity type, or null if nothing approved. */
+  readonly roi: number | null;
+}
+
+/**
+ * Roll the portfolio up by activity type (event/campaign/content/...), sorted by
+ * approved spend. Surfaces which kinds of marketing the MDF is actually funding.
+ */
+export function summaryByActivity(
+  reqs: readonly (MdfLike & { activityType: string })[],
+): ActivitySummary[] {
+  const groups = new Map<string, (MdfLike & { activityType: string })[]>();
+  for (const r of reqs) {
+    const g = groups.get(r.activityType);
+    if (g) g.push(r);
+    else groups.set(r.activityType, [r]);
+  }
+  return [...groups.entries()]
+    .map(([activityType, rows]) => {
+      const requested = sum(rows, (r) => r.requestedAmount);
+      const approved = sum(rows, (r) => r.approvedAmount);
+      const reimbursed = sum(rows, (r) => r.reimbursedAmount);
+      const pipeline = sum(rows, (r) => r.expectedPipeline);
+      return {
+        activityType,
+        count: rows.length,
+        requested,
+        approved,
+        reimbursed,
+        pipeline,
+        roi: approved > 0 ? Math.round((pipeline / approved) * 100) / 100 : null,
+      };
+    })
+    .sort((a, b) => b.approved - a.approved || b.requested - a.requested);
+}

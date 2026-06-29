@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { setupTestDb } from "../helpers/embedded-pg";
 import type { TestDb } from "../helpers/embedded-pg";
 import type { MutationContext } from "@/gate/mutation-gate";
@@ -16,6 +16,8 @@ let db: TestDb;
 let gate: typeof import("@/gate/mutation-gate");
 let errors: typeof import("@/http/errors");
 let ops: typeof import("@/domain/mdf/operations");
+let load: typeof import("@/domain/mdf/load");
+let planOps: typeof import("@/domain/mdf/plan-operations");
 
 const tenantA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const tenantB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -67,6 +69,8 @@ beforeAll(async () => {
   gate = await import("@/gate/mutation-gate");
   errors = await import("@/http/errors");
   ops = await import("@/domain/mdf/operations");
+  load = await import("@/domain/mdf/load");
+  planOps = await import("@/domain/mdf/plan-operations");
 
   const { withSystem } = db.client;
   const { tenants, users } = db.schema;
@@ -99,7 +103,7 @@ describe("mdf end-to-end", () => {
       ops.createRequestOp(ctx, eligibleInput({ ownerUserId: null, opportunityRef: null })),
     );
     await expect(
-      run("mdf:update", "submit-bad", (ctx) => ops.submitRequestOp(ctx, { id: created.body.id })),
+      run("mdf:update", "submit-bad", (ctx) => ops.submitRequestOp(ctx, { id: created.body.id, today: "2026-06-23" })),
     ).rejects.toBeInstanceOf(errors.ValidationError);
   });
 
@@ -107,7 +111,7 @@ describe("mdf end-to-end", () => {
     const created = await run("mdf:create", "create", (ctx) => ops.createRequestOp(ctx, eligibleInput()));
     requestId = created.body.id;
 
-    const res = await run("mdf:update", "submit", (ctx) => ops.submitRequestOp(ctx, { id: requestId }));
+    const res = await run("mdf:update", "submit", (ctx) => ops.submitRequestOp(ctx, { id: requestId, today: "2026-06-23" }));
     expect(res.body.status).toBe("requested");
 
     const { withTenant } = db.client;
@@ -200,6 +204,197 @@ describe("mdf end-to-end", () => {
       withTenant(identity(tenantB, ownerB), (tx) =>
         tx.insert(mdfRequests).values({ tenantId: tenantA, title: "forged" }),
       ),
+    ).rejects.toThrow();
+  });
+});
+
+describe("mdf bulk actions, budget + snapshots", () => {
+  // Create a fresh request and submit it so it sits in the `requested` state.
+  async function makeRequested(key: string): Promise<string> {
+    const created = await run("mdf:create", `bc-${key}`, (ctx) =>
+      ops.createRequestOp(ctx, eligibleInput({ title: `bulk ${key}` })),
+    );
+    await run("mdf:update", `bs-${key}`, (ctx) => ops.submitRequestOp(ctx, { id: created.body.id, today: "2026-06-23" }));
+    return created.body.id;
+  }
+
+  it("bulk-approves only requested rows, at their full requested amount", async () => {
+    const a = await makeRequested("a");
+    const b = await makeRequested("b");
+    // c stays a draft (not requested) and must be skipped by the status guard.
+    const c = await run("mdf:create", "bc-c", (ctx) => ops.createRequestOp(ctx, eligibleInput({ title: "bulk c" })));
+
+    const res = await run("mdf:approve", "bulk-approve", (ctx) =>
+      ops.bulkApproveMdfOp(ctx, { ids: [a, b, c.body.id], notes: "batch" }),
+    );
+    expect(res.body.count).toBe(2);
+
+    const { withTenant } = db.client;
+    const { mdfRequests } = db.schema;
+    const rows = await withTenant(idA(), (tx) =>
+      tx.select().from(mdfRequests).where(inArray(mdfRequests.id, [a, b, c.body.id])),
+    );
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get(a)!.status).toBe("approved");
+    expect(byId.get(a)!.approvedAmount).toBe(10_000); // full requested amount
+    expect(byId.get(c.body.id)!.status).toBe("draft"); // untouched
+  });
+
+  it("bulk-rejects requested rows", async () => {
+    const a = await makeRequested("r1");
+    const b = await makeRequested("r2");
+    const res = await run("mdf:approve", "bulk-reject", (ctx) =>
+      ops.bulkRejectMdfOp(ctx, { ids: [a, b], notes: "out of budget" }),
+    );
+    expect(res.body.count).toBe(2);
+
+    const { withTenant } = db.client;
+    const { mdfRequests } = db.schema;
+    const [r] = await withTenant(idA(), (tx) => tx.select().from(mdfRequests).where(eq(mdfRequests.id, a)));
+    expect(r!.status).toBe("rejected");
+    expect(r!.reviewNotes).toBe("out of budget");
+  });
+
+  it("bulk approve is a no-op across tenants (RLS scopes the UPDATE)", async () => {
+    const a = await makeRequested("x");
+    const res = await run(
+      "mdf:approve",
+      "bulk-cross",
+      (ctx) => ops.bulkApproveMdfOp(ctx, { ids: [a], notes: "" }),
+      () => identity(tenantB, ownerB),
+    );
+    expect(res.body.count).toBe(0);
+
+    const { withTenant } = db.client;
+    const { mdfRequests } = db.schema;
+    const [r] = await withTenant(idA(), (tx) => tx.select().from(mdfRequests).where(eq(mdfRequests.id, a)));
+    expect(r!.status).toBe("requested"); // tenant A's row is untouched
+  });
+
+  it("creates a budget and loads the active one for a date in its period", async () => {
+    const res = await run("mdf:approve", "budget-create", (ctx) =>
+      ops.createBudgetOp(ctx, {
+        periodLabel: "Q3 2026",
+        amount: 100_000,
+        periodStart: "2026-07-01",
+        periodEnd: "2026-09-30",
+      }),
+    );
+    expect(res.body.id).toBeTruthy();
+
+    const active = await load.loadActiveBudget(idA(), "2026-08-15");
+    expect(active?.amount).toBe(100_000);
+    expect(active?.periodLabel).toBe("Q3 2026");
+
+    const none = await load.loadActiveBudget(idA(), "2026-12-31");
+    expect(none).toBeNull();
+  });
+
+  it("captures a daily MDF snapshot idempotently and reads the chronological series", async () => {
+    const base = {
+      requested: 0,
+      approved: 50_000,
+      deployed: 0,
+      claimed: 10_000,
+      reimbursed: 5_000,
+      remaining: 40_000,
+      pipeline: 0,
+      roi: null,
+      deadlineRisks: 2,
+      openCount: 3,
+    };
+    await load.captureMdfSnapshot(idA(), base, "2026-06-10");
+    await load.captureMdfSnapshot(idA(), { ...base, reimbursed: 6_000 }, "2026-06-10"); // same day -> upsert
+    await load.captureMdfSnapshot(idA(), { ...base, reimbursed: 7_000 }, "2026-06-11");
+
+    const { withTenant } = db.client;
+    const { mdfSnapshots } = db.schema;
+    const rows = await withTenant(idA(), (tx) =>
+      tx.select().from(mdfSnapshots).where(eq(mdfSnapshots.tenantId, tenantA)),
+    );
+    expect(rows).toHaveLength(2); // two distinct days, not three inserts
+
+    const trends = await load.loadMdfTrends(idA());
+    expect(trends.reimbursed.length).toBeGreaterThanOrEqual(2);
+    expect(trends.reimbursed.at(-1)).toBe(7_000); // chronological — latest day last
+  });
+});
+
+describe("mdf event planner", () => {
+  const TODAY = "2026-06-23";
+
+  it("creates a plan, adds an eligible event, and converts it to a linked draft request", async () => {
+    const plan = await run("mdf:create", "plan-1", (ctx) => planOps.createPlanOp(ctx, { title: "H2 demand-gen", notes: "" }));
+    const item = await run("mdf:create", "item-1", (ctx) =>
+      planOps.addPlanItemOp(ctx, {
+        planId: plan.body.id,
+        title: "Industry conference booth",
+        catalogKey: "industry-conference", // approved / event
+        totalCost: 20_000,
+        coFundPct: 50,
+        expectedPipeline: 80_000,
+        expectedOpportunities: 5,
+        startDate: "2026-09-01",
+        endDate: "2026-09-03",
+        spmsId: null,
+      }),
+    );
+    const conv = await run("mdf:create", "convert-1", (ctx) =>
+      planOps.convertPlanItemToRequestOp(ctx, { id: item.body.id, today: TODAY }),
+    );
+    expect(conv.body.requestId).toBeTruthy();
+    expect(conv.body.planId).toBe(plan.body.id);
+
+    const { withTenant } = db.client;
+    const { mdfRequests, mdfPlanItems } = db.schema;
+    const [r] = await withTenant(idA(), (tx) => tx.select().from(mdfRequests).where(eq(mdfRequests.id, conv.body.requestId)));
+    expect(r!.status).toBe("draft");
+    expect(r!.requestedAmount).toBe(10_000); // 50% of 20k
+    expect(r!.catalogKey).toBe("industry-conference");
+    expect(r!.totalCost).toBe(20_000);
+
+    const [it] = await withTenant(idA(), (tx) => tx.select().from(mdfPlanItems).where(eq(mdfPlanItems.id, item.body.id)));
+    expect(it!.requestId).toBe(conv.body.requestId); // linked back
+    expect(it!.activityType).toBe("event"); // derived from the catalog
+  });
+
+  it("refuses to convert a blocked (ineligible) event", async () => {
+    const plan = await run("mdf:create", "plan-2", (ctx) => planOps.createPlanOp(ctx, { title: "bad plan", notes: "" }));
+    const item = await run("mdf:create", "item-2", (ctx) =>
+      planOps.addPlanItemOp(ctx, {
+        planId: plan.body.id,
+        title: "Team offsite",
+        catalogKey: "travel", // ineligible
+        totalCost: 5_000,
+        coFundPct: 50,
+        expectedPipeline: 0,
+        expectedOpportunities: 0,
+        startDate: "2026-09-01",
+        endDate: "2026-09-03",
+        spmsId: null,
+      }),
+    );
+    await expect(
+      run("mdf:create", "convert-2", (ctx) => planOps.convertPlanItemToRequestOp(ctx, { id: item.body.id, today: TODAY })),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("submit hard-blocks a request grounded in an ineligible activity", async () => {
+    const created = await run("mdf:create", "req-blocked", (ctx) =>
+      ops.createRequestOp(ctx, eligibleInput({ catalogKey: "travel", totalCost: 5_000 })),
+    );
+    await expect(
+      run("mdf:update", "submit-blocked", (ctx) => ops.submitRequestOp(ctx, { id: created.body.id, today: TODAY })),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("tenant B cannot see tenant A's plans, and WITH CHECK blocks forging one", async () => {
+    const { withTenant } = db.client;
+    const { mdfEventPlans } = db.schema;
+    const seen = await withTenant(identity(tenantB, ownerB), (tx) => tx.select().from(mdfEventPlans));
+    expect(seen).toHaveLength(0);
+    await expect(
+      withTenant(identity(tenantB, ownerB), (tx) => tx.insert(mdfEventPlans).values({ tenantId: tenantA, title: "forged" })),
     ).rejects.toThrow();
   });
 });

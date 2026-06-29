@@ -1,10 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
-import { mdfRequests, users } from "@/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { mdfBudgets, mdfRequests, users } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
 import { createSourcedTask } from "@/domain/tasks/operations";
 import { createSourcedEvidence } from "@/domain/evidence/operations";
 import { preflight, type MdfLike } from "@/domain/mdf/analytics";
+import { complianceChecks } from "@/domain/mdf/compliance";
 import type { MdfStatus } from "@/domain/mdf/lifecycle";
 
 /**
@@ -50,6 +51,8 @@ export interface CreateRequestInput {
   readonly endDate: string | null;
   readonly claimDeadline: string | null;
   readonly opportunityRef: string | null;
+  readonly catalogKey?: string | null;
+  readonly totalCost?: number | null;
 }
 
 export async function createRequestOp(
@@ -70,6 +73,8 @@ export async function createRequestOp(
       endDate: input.endDate,
       claimDeadline: input.claimDeadline,
       opportunityRef: input.opportunityRef,
+      catalogKey: input.catalogKey ?? null,
+      totalCost: input.totalCost ?? null,
       createdBy: identity.userId,
     })
     .returning({ id: mdfRequests.id });
@@ -87,6 +92,8 @@ export interface UpdateRequestInput {
   readonly endDate?: string | null;
   readonly claimDeadline?: string | null;
   readonly opportunityRef?: string | null;
+  readonly catalogKey?: string | null;
+  readonly totalCost?: number | null;
 }
 
 export async function updateRequestOp(
@@ -110,6 +117,8 @@ export async function updateRequestOp(
   if (input.endDate !== undefined) set.endDate = input.endDate;
   if (input.claimDeadline !== undefined) set.claimDeadline = input.claimDeadline;
   if (input.opportunityRef !== undefined) set.opportunityRef = input.opportunityRef;
+  if (input.catalogKey !== undefined) set.catalogKey = input.catalogKey;
+  if (input.totalCost !== undefined) set.totalCost = input.totalCost;
 
   await tx
     .update(mdfRequests)
@@ -141,14 +150,30 @@ async function advance(
   }
 }
 
-/** draft -> requested. Guarded by the eligibility preflight. */
+/** draft -> requested. Guarded by the eligibility preflight + AWS hard rules. */
 export async function submitRequestOp(
   ctx: MutationContext,
-  input: { readonly id: string },
+  input: { readonly id: string; readonly today: string },
 ): Promise<{ status: "requested" }> {
   const req = await loadRequest(ctx, input.id);
   if (!preflight(req as MdfLike).eligible) {
     throw new ValidationError("Request fails eligibility preflight; resolve the open checks first");
+  }
+  // When grounded in the AWS activity catalog, also enforce the hard AWS rules
+  // (ineligible activity, dates crossing calendar years, past the Dec 1 cutoff).
+  if (req.catalogKey) {
+    const block = complianceChecks(
+      {
+        catalogKey: req.catalogKey,
+        startDate: req.startDate,
+        endDate: req.endDate,
+        totalCost: req.totalCost ?? req.requestedAmount,
+        coFundPct: 50,
+        brandingConfirmed: req.awsBrandingConfirmed,
+      },
+      input.today,
+    ).find((c) => c.severity === "block");
+    if (block) throw new ValidationError(`AWS rules block this request: ${block.message}`);
   }
   await advance(ctx, input.id, "draft", { status: "requested", submittedAt: sql`now()` });
   return { status: "requested" };
@@ -272,4 +297,102 @@ export async function createTaskFromRequestOp(
       .where(and(eq(mdfRequests.id, input.id), eq(mdfRequests.tenantId, ctx.identity.tenantId)));
   }
   return { taskId };
+}
+
+/**
+ * Bulk-approve `requested` rows at their full requested amount. The `requested`
+ * status guard means non-requested ids are silently skipped (count reflects what
+ * actually advanced), and the SQL `requested_amount` reference approves each row
+ * at its own ask in a single statement. Per-amount transitions (deploy/claim/
+ * reimburse) are intentionally NOT bulkable — they need a per-row figure.
+ */
+export async function bulkApproveMdfOp(
+  { identity, tx }: MutationContext,
+  input: { readonly ids: readonly string[]; readonly notes: string },
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No rows selected");
+  const updated = await tx
+    .update(mdfRequests)
+    .set({
+      status: "approved",
+      approvedAmount: sql`${mdfRequests.requestedAmount}`,
+      approvedAt: sql`now()`,
+      reviewNotes: input.notes,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(mdfRequests.id, [...input.ids]),
+        eq(mdfRequests.tenantId, identity.tenantId),
+        eq(mdfRequests.status, "requested"),
+      ),
+    )
+    .returning({ id: mdfRequests.id });
+  return { count: updated.length };
+}
+
+/** Bulk-reject `requested` rows (status-guarded; non-requested ids are skipped). */
+export async function bulkRejectMdfOp(
+  { identity, tx }: MutationContext,
+  input: { readonly ids: readonly string[]; readonly notes: string },
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No rows selected");
+  const updated = await tx
+    .update(mdfRequests)
+    .set({ status: "rejected", reviewNotes: input.notes, updatedAt: sql`now()` })
+    .where(
+      and(
+        inArray(mdfRequests.id, [...input.ids]),
+        eq(mdfRequests.tenantId, identity.tenantId),
+        eq(mdfRequests.status, "requested"),
+      ),
+    )
+    .returning({ id: mdfRequests.id });
+  return { count: updated.length };
+}
+
+export interface BudgetInput {
+  readonly periodLabel: string;
+  readonly amount: number;
+  readonly periodStart: string;
+  readonly periodEnd: string;
+}
+
+/** Create a per-period MDF budget allocation. Managerial — gated on mdf:approve. */
+export async function createBudgetOp(
+  { identity, tx }: MutationContext,
+  input: BudgetInput,
+): Promise<{ id: string }> {
+  const [row] = await tx
+    .insert(mdfBudgets)
+    .values({
+      tenantId: identity.tenantId,
+      periodLabel: input.periodLabel,
+      amount: input.amount,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      createdBy: identity.userId,
+    })
+    .returning({ id: mdfBudgets.id });
+  return { id: row!.id };
+}
+
+/** Update an existing budget allocation. */
+export async function updateBudgetOp(
+  { identity, tx }: MutationContext,
+  input: BudgetInput & { readonly id: string },
+): Promise<{ id: string }> {
+  const updated = await tx
+    .update(mdfBudgets)
+    .set({
+      periodLabel: input.periodLabel,
+      amount: input.amount,
+      periodStart: input.periodStart,
+      periodEnd: input.periodEnd,
+      updatedAt: sql`now()`,
+    })
+    .where(and(eq(mdfBudgets.id, input.id), eq(mdfBudgets.tenantId, identity.tenantId)))
+    .returning({ id: mdfBudgets.id });
+  if (updated.length === 0) throw new ValidationError("Budget not found");
+  return { id: input.id };
 }
