@@ -20,6 +20,8 @@ import {
   approveReport,
   markReportExported,
 } from "@/domain/reports/actions";
+import { generateReportNarrative } from "@/domain/reports/narrative-actions";
+import { isReportNarrativeAiEnabled } from "@/domain/reports/narrative-ai";
 import {
   REPORT_TYPE_LABELS,
   REPORT_STATUS_LABELS,
@@ -32,8 +34,8 @@ import {
   type ReportSnapshot,
   type ReportHealthBand,
 } from "@/domain/reports/metrics";
+import { money } from "@/domain/format";
 
-const money = (n: number): string => `$${n.toLocaleString()}`;
 
 const BAND_COLOR: Record<ReportHealthBand, string> = {
   strong: "var(--ok)",
@@ -57,6 +59,7 @@ export default async function ReportDetailPage({
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
   const canApprove = can(identity.role, "report:approve");
+  const canUpdate = can(identity.role, "report:update");
 
   const data = await withTenant(identity, async (tx) => {
     const [report] = await tx
@@ -155,6 +158,38 @@ export default async function ReportDetailPage({
         </Panel>
       )}
 
+      {/* Saved executive narrative (drizzle/0052) — graph-grounded story, drafted while
+          in draft, frozen by the lifecycle, cleared on snapshot regeneration. */}
+      {(report.narrative || (status === "draft" && canUpdate)) && (
+        <Panel title="Executive narrative">
+          <div style={{ display: "grid", gap: 12 }}>
+            {report.narrative ? (
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.7 }}>{report.narrative}</div>
+            ) : (
+              <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
+                No narrative yet. Generate the partnership&apos;s story for this draft — grounded in the
+                frozen snapshot and the value-flow graph, it survives review and prints on the packet.
+              </p>
+            )}
+            {status === "draft" && canUpdate && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <MutationForm
+                  action={generateReportNarrative}
+                  submitLabel={report.narrative ? "Regenerate narrative" : "Generate narrative"}
+                  variant="secondary"
+                  hidden={{ reportId: report.id }}
+                />
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                  {isReportNarrativeAiEnabled()
+                    ? "AI-drafted from the snapshot + value-flow graph."
+                    : "Works without a key — saves the deterministic outline. Set ANTHROPIC_API_KEY for AI prose."}
+                </span>
+              </div>
+            )}
+          </div>
+        </Panel>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
         <Panel title="MDF">
           <BarChart
@@ -230,6 +265,32 @@ export default async function ReportDetailPage({
             <MetricCard label="Latest score" value={snapshot.assessments.latestScore == null ? "—" : `${snapshot.assessments.latestScore}/100`} />
           </MetricStrip>
         </Panel>
+
+        {snapshot.marketplace && snapshot.marketplace.listings > 0 && (
+          <Panel title="AWS Marketplace">
+            <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <RingGauge
+                value={Math.round((snapshot.marketplace.published / snapshot.marketplace.listings) * 100)}
+                color="var(--accent-2)"
+                caption="published"
+                size={104}
+              />
+              <div style={{ fontSize: 13, color: "var(--muted)", display: "grid", gap: 4 }}>
+                <span>
+                  <strong style={{ color: "var(--text)" }}>{snapshot.marketplace.published}</strong>/
+                  {snapshot.marketplace.listings} listings published
+                </span>
+                <span>{snapshot.marketplace.activeEntitlements} active entitlements</span>
+                <span>
+                  <strong style={{ color: "var(--text)" }}>
+                    {money(Math.round(snapshot.marketplace.attributedRevenueCents / 100))}
+                  </strong>{" "}
+                  attributed revenue
+                </span>
+              </div>
+            </div>
+          </Panel>
+        )}
       </div>
 
       <Panel title="Approval preflight">

@@ -218,3 +218,94 @@ describe("solutions", () => {
     ).rejects.toBeInstanceOf(errors.ValidationError);
   });
 });
+
+describe("solution program link", () => {
+  let progA = "";
+  let progB = "";
+
+  beforeAll(async () => {
+    const { withSystem } = db.client;
+    const { programs } = db.schema;
+    await withSystem(async (tx) => {
+      const rows = await tx
+        .insert(programs)
+        .values([
+          { tenantId: tenantA, libraryKey: "security_competency", name: "Security Competency", programType: "Competency", deliveryModel: "Consulting", fundingFit: "high", status: "active" },
+          { tenantId: tenantB, libraryKey: "devops_competency", name: "DevOps Competency", programType: "Competency", deliveryModel: "Consulting", fundingFit: "high", status: "active" },
+        ])
+        .returning({ id: programs.id, tenantId: programs.tenantId });
+      progA = rows.find((r) => r.tenantId === tenantA)!.id;
+      progB = rows.find((r) => r.tenantId === tenantB)!.id;
+    });
+  });
+
+  it("creates a Solution owned by a program and lists the program name", async () => {
+    const res = await run("solution:create", "sol-create-linked", (ctx) =>
+      ops.createSolutionOp(ctx, {
+        title: "Linked Solution",
+        solutionType: "consulting_service",
+        programType: "Competency",
+        programId: progA,
+      }),
+    );
+    const linkedId: string = res.body.id;
+
+    const list = await load.loadSolutions(idA(), TODAY);
+    const row = list.find((s) => s.id === linkedId)!;
+    expect(row.programId).toBe(progA);
+    expect(row.programName).toBe("Security Competency");
+
+    const detail = await load.loadSolutionDetail(idA(), linkedId, TODAY);
+    expect(detail!.programId).toBe(progA);
+    expect(detail!.programName).toBe("Security Competency");
+  });
+
+  it("sets and clears the program link via update", async () => {
+    await run("solution:update", "sol-link-set", (ctx) =>
+      ops.updateSolutionOp(ctx, { solutionId: solId, programId: progA }),
+    );
+    let detail = await load.loadSolutionDetail(idA(), solId, TODAY);
+    expect(detail!.programId).toBe(progA);
+
+    // programId omitted -> untouched.
+    await run("solution:update", "sol-link-hold", (ctx) =>
+      ops.updateSolutionOp(ctx, { solutionId: solId, title: "Threat Detection Platform" }),
+    );
+    detail = await load.loadSolutionDetail(idA(), solId, TODAY);
+    expect(detail!.programId).toBe(progA);
+
+    // Explicit null clears it.
+    await run("solution:update", "sol-link-clear", (ctx) =>
+      ops.updateSolutionOp(ctx, { solutionId: solId, programId: null }),
+    );
+    detail = await load.loadSolutionDetail(idA(), solId, TODAY);
+    expect(detail!.programId).toBeNull();
+    expect(detail!.programName).toBeNull();
+  });
+
+  it("rejects linking another tenant's program (cross-tenant guard)", async () => {
+    await expect(
+      run("solution:update", "sol-link-cross", (ctx) => ops.updateSolutionOp(ctx, { solutionId: solId, programId: progB })),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+    await expect(
+      run("solution:create", "sol-create-cross", (ctx) =>
+        ops.createSolutionOp(ctx, { title: "Bad link", solutionType: "consulting_service", programType: "Competency", programId: progB }),
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("keeps launchedCount correct with the programs join in the aggregate", async () => {
+    // solId has 2 launched-in-window opps from earlier tests; linking a program
+    // must not inflate the count (programs.name rides the GROUP BY, not the
+    // aggregate), and the count stays per-solution.
+    await run("solution:update", "sol-link-agg", (ctx) =>
+      ops.updateSolutionOp(ctx, { solutionId: solId, programId: progA }),
+    );
+    const list = await load.loadSolutions(idA(), TODAY);
+    const linked = list.find((s) => s.id === solId)!;
+    expect(linked.launchedCount).toBe(2);
+    expect(linked.programName).toBe("Security Competency");
+    const other = list.find((s) => s.id !== solId)!;
+    expect(other.launchedCount).toBe(0); // no opps -> the join must not leak counts across rows
+  });
+});

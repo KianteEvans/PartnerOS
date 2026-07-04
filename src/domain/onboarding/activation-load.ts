@@ -1,23 +1,16 @@
-import { and, count, eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { withTenant } from "@/db/client";
 import type { DbIdentity } from "@/db/client";
-import {
-  onboarding,
-  assessments,
-  roadmaps,
-  programs,
-  evidence,
-  opportunities,
-  mdfRequests,
-  solutions,
-  tierPlans,
-} from "@/db/schema";
+import { onboarding } from "@/db/schema";
 import type { ActivationAnswers, ActivationCounts } from "@/domain/onboarding/activation";
 
 /**
- * Live workspace counts that drive the activation checklist. One RLS transaction
- * of cheap COUNT(*) queries; the pure `activationChecklist` turns these + the
- * partner's declared objectives into the "Getting started" list.
+ * Live workspace counts that drive the activation checklist. ONE round trip of
+ * scalar COUNT subqueries (was eight separate COUNT(*) statements — each a full
+ * protocol round trip on the transaction's single connection); the pure
+ * `activationChecklist` turns these + the partner's declared objectives into
+ * the "Getting started" list. Runs under the tenant role, so RLS still applies
+ * to every subquery; the explicit tenant_id predicates keep the index paths.
  */
 export async function loadActivation(
   identity: DbIdentity,
@@ -31,27 +24,28 @@ export async function loadActivation(
       .where(eq(onboarding.tenantId, t))
       .limit(1);
 
-    const [scored] = await tx
-      .select({ c: count() })
-      .from(assessments)
-      .where(and(eq(assessments.tenantId, t), eq(assessments.status, "scored")));
-    const [roadmapN] = await tx.select({ c: count() }).from(roadmaps).where(eq(roadmaps.tenantId, t));
-    const [programN] = await tx.select({ c: count() }).from(programs).where(eq(programs.tenantId, t));
-    const [evidenceN] = await tx.select({ c: count() }).from(evidence).where(eq(evidence.tenantId, t));
-    const [oppN] = await tx.select({ c: count() }).from(opportunities).where(eq(opportunities.tenantId, t));
-    const [mdfN] = await tx.select({ c: count() }).from(mdfRequests).where(eq(mdfRequests.tenantId, t));
-    const [solutionN] = await tx.select({ c: count() }).from(solutions).where(eq(solutions.tenantId, t));
-    const [tierN] = await tx.select({ c: count() }).from(tierPlans).where(eq(tierPlans.tenantId, t));
+    const res = await tx.execute(sql`
+      select
+        (select count(*)::int from assessments where tenant_id = ${t} and status = 'scored') as scored,
+        (select count(*)::int from roadmaps where tenant_id = ${t}) as roadmaps,
+        (select count(*)::int from programs where tenant_id = ${t}) as programs,
+        (select count(*)::int from evidence where tenant_id = ${t}) as evidence,
+        (select count(*)::int from opportunities where tenant_id = ${t}) as opportunities,
+        (select count(*)::int from mdf_requests where tenant_id = ${t}) as mdf,
+        (select count(*)::int from solutions where tenant_id = ${t}) as solutions,
+        (select count(*)::int from tier_plans where tenant_id = ${t}) as tier_plans
+    `);
+    const c = (res as unknown as Array<Record<string, number>>)[0] ?? {};
 
     const counts: ActivationCounts = {
-      assessmentScored: (scored?.c ?? 0) > 0,
-      roadmaps: roadmapN?.c ?? 0,
-      adoptedPrograms: programN?.c ?? 0,
-      evidence: evidenceN?.c ?? 0,
-      opportunities: oppN?.c ?? 0,
-      mdfRequests: mdfN?.c ?? 0,
-      solutions: solutionN?.c ?? 0,
-      tierPlan: (tierN?.c ?? 0) > 0,
+      assessmentScored: (c.scored ?? 0) > 0,
+      roadmaps: c.roadmaps ?? 0,
+      adoptedPrograms: c.programs ?? 0,
+      evidence: c.evidence ?? 0,
+      opportunities: c.opportunities ?? 0,
+      mdfRequests: c.mdf ?? 0,
+      solutions: c.solutions ?? 0,
+      tierPlan: (c.tier_plans ?? 0) > 0,
     };
     const answers: ActivationAnswers = {
       objectives: Array.isArray(ob?.objectives) ? (ob.objectives as string[]) : [],

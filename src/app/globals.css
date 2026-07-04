@@ -117,12 +117,18 @@
 :root[data-section="programs"] { --section-accent: #7c3aed; }
 :root[data-section="plan"]     { --section-accent: #059669; }
 :root[data-section="reports"]  { --section-accent: #2563eb; }
+:root[data-section="marketplace"] { --section-accent: #c026d3; }
+:root[data-section="funding"]     { --section-accent: #16a34a; }
+:root[data-section="playbooks"]   { --section-accent: #e11d48; }
 :root[data-theme="dark"][data-section="command"]  { --section-accent: #818cf8; }
 :root[data-theme="dark"][data-section="ace"]      { --section-accent: #2dd4bf; }
 :root[data-theme="dark"][data-section="mdf"]      { --section-accent: #f59e0b; }
 :root[data-theme="dark"][data-section="programs"] { --section-accent: #a78bfa; }
 :root[data-theme="dark"][data-section="plan"]     { --section-accent: #34d399; }
 :root[data-theme="dark"][data-section="reports"]  { --section-accent: #60a5fa; }
+:root[data-theme="dark"][data-section="marketplace"] { --section-accent: #e879f9; }
+:root[data-theme="dark"][data-section="funding"]     { --section-accent: #22c55e; }
+:root[data-theme="dark"][data-section="playbooks"]   { --section-accent: #fb7185; }
 /* A themed section's hero glows its own colour (un-themed keeps the blue tint). */
 :root[data-section] {
   --surface-hero: linear-gradient(

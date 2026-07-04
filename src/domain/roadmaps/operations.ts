@@ -6,12 +6,15 @@ import {
   assessmentModules,
   programs,
   tierPlans,
+  tierRequirements,
   tenants,
   tasks,
   users,
 } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
+import { gapFor, type RequirementValue } from "@/domain/tiers/gap";
+import { reconcileMilestones } from "@/domain/roadmaps/reconcile";
 import { createSourcedTask } from "@/domain/tasks/operations";
 import { GAP_THRESHOLD } from "@/domain/assessments/scoring";
 import { MODULE_LABELS, type ModuleId } from "@/domain/assessments/catalog";
@@ -24,6 +27,7 @@ import {
 } from "@/domain/roadmaps/planner";
 import { composeMilestones } from "@/domain/roadmaps/compose";
 import { milestoneStatusToTask } from "@/domain/roadmaps/status-sync";
+import { wouldCreateCycle } from "@/domain/roadmaps/schedule";
 import { getLibraryProgram } from "@/domain/programs/library";
 import { adoptProgramOp } from "@/domain/programs/operations";
 import { createTierPlanOp } from "@/domain/tiers/operations";
@@ -565,6 +569,8 @@ export interface UpdateMilestoneInput {
   readonly targetDate?: string;
   readonly title?: string;
   readonly detail?: string;
+  /** null clears the dependency (makes a root); undefined leaves it unchanged. */
+  readonly dependsOnId?: string | null;
 }
 
 export async function updateMilestoneOp(
@@ -573,7 +579,11 @@ export async function updateMilestoneOp(
 ): Promise<{ id: string }> {
   // The milestone's roadmap must still be a draft.
   const [row] = await tx
-    .select({ status: roadmaps.status })
+    .select({
+      status: roadmaps.status,
+      roadmapId: roadmapMilestones.roadmapId,
+      sequence: roadmapMilestones.sequence,
+    })
     .from(roadmapMilestones)
     .innerJoin(roadmaps, eq(roadmaps.id, roadmapMilestones.roadmapId))
     .where(
@@ -597,11 +607,42 @@ export async function updateMilestoneOp(
     if (!owner) throw new ValidationError("Owner is not a member of this workspace");
   }
 
+  // A dependency must point at an EARLIER milestone in the same roadmap, and must
+  // not introduce a cycle (defence-in-depth — the strict-backward rule already
+  // prevents one). null clears it.
+  if (input.dependsOnId !== undefined && input.dependsOnId !== null) {
+    if (input.dependsOnId === input.milestoneId) {
+      throw new ValidationError("A milestone cannot depend on itself");
+    }
+    const siblings = await tx
+      .select({
+        id: roadmapMilestones.id,
+        sequence: roadmapMilestones.sequence,
+        dependsOnId: roadmapMilestones.dependsOnId,
+      })
+      .from(roadmapMilestones)
+      .where(
+        and(
+          eq(roadmapMilestones.roadmapId, row.roadmapId),
+          eq(roadmapMilestones.tenantId, identity.tenantId),
+        ),
+      );
+    const target = siblings.find((s) => s.id === input.dependsOnId);
+    if (!target) throw new ValidationError("Dependency must be a milestone in this roadmap");
+    if (target.sequence >= row.sequence) {
+      throw new ValidationError("A milestone can only depend on an earlier milestone");
+    }
+    if (wouldCreateCycle(siblings, input.milestoneId, input.dependsOnId)) {
+      throw new ValidationError("That dependency would create a cycle");
+    }
+  }
+
   const set: Record<string, unknown> = { updatedAt: sql`now()` };
   if (input.ownerUserId !== undefined) set.ownerUserId = input.ownerUserId;
   if (input.targetDate !== undefined) set.targetDate = input.targetDate;
   if (input.title !== undefined) set.title = input.title;
   if (input.detail !== undefined) set.detail = input.detail;
+  if (input.dependsOnId !== undefined) set.dependsOnId = input.dependsOnId;
 
   await tx
     .update(roadmapMilestones)
@@ -673,6 +714,80 @@ export async function setMilestoneStatusOp(
 }
 
 /**
+ * Live reconciliation: auto-advance a roadmap's `program`/`tier` milestones to "done"
+ * when the real underlying state objectively satisfies them (program active / tier
+ * requirement met). Forward-only, reuses setMilestoneStatusOp (so the linked task mirrors
+ * to done too). Returns the milestones advanced this run for a one-time UI notice.
+ */
+export async function reconcileMilestonesOp(
+  ctx: MutationContext,
+  input: { readonly roadmapId: string },
+): Promise<{ advanced: readonly { title: string; reason: string }[] }> {
+  const { identity, tx } = ctx;
+
+  const progRows = await tx
+    .select({ libraryKey: programs.libraryKey })
+    .from(programs)
+    .where(and(eq(programs.tenantId, identity.tenantId), eq(programs.status, "active")));
+  const activeProgramKeys = new Set(progRows.map((p) => p.libraryKey));
+
+  // Met tier requirements for the active plan, keyed "<targetTier>:<requirementKey>".
+  const metTierReqKeys = new Set<string>();
+  const [plan] = await tx
+    .select({ id: tierPlans.id, targetTier: tierPlans.targetTier })
+    .from(tierPlans)
+    .where(eq(tierPlans.tenantId, identity.tenantId));
+  if (plan) {
+    const reqRows = await tx
+      .select({
+        key: tierRequirements.requirementKey,
+        label: tierRequirements.label,
+        category: tierRequirements.category,
+        threshold: tierRequirements.threshold,
+        currentValue: tierRequirements.currentValue,
+        kind: tierRequirements.kind,
+        secondaryThreshold: tierRequirements.secondaryThreshold,
+        secondaryCurrentValue: tierRequirements.secondaryCurrentValue,
+        informational: tierRequirements.informational,
+      })
+      .from(tierRequirements)
+      .where(and(eq(tierRequirements.planId, plan.id), eq(tierRequirements.tenantId, identity.tenantId)));
+    for (const r of reqRows) {
+      if (r.informational) continue;
+      const req: RequirementValue = {
+        key: r.key,
+        label: r.label,
+        category: r.category,
+        threshold: r.threshold,
+        currentValue: r.currentValue,
+        kind: r.kind as NonNullable<RequirementValue["kind"]>,
+        secondaryThreshold: r.secondaryThreshold,
+        secondaryCurrentValue: r.secondaryCurrentValue,
+        informational: r.informational,
+      };
+      if (gapFor(req).met) metTierReqKeys.add(`${plan.targetTier}:${r.key}`);
+    }
+  }
+
+  const msRows = await tx
+    .select({
+      id: roadmapMilestones.id,
+      title: roadmapMilestones.title,
+      originKind: roadmapMilestones.originKind,
+      originRef: roadmapMilestones.originRef,
+      status: roadmapMilestones.status,
+    })
+    .from(roadmapMilestones)
+    .where(and(eq(roadmapMilestones.roadmapId, input.roadmapId), eq(roadmapMilestones.tenantId, identity.tenantId)));
+
+  const { toAdvance } = reconcileMilestones(msRows, { activeProgramKeys, metTierReqKeys });
+  for (const a of toAdvance) {
+    await setMilestoneStatusOp(ctx, { milestoneId: a.id, status: "done" });
+  }
+  return { advanced: toAdvance.map((a) => ({ title: a.title, reason: a.reason })) };
+}
+
+/**
  * Re-sequence a draft roadmap's milestones to the given order and re-wire the
  * linear dependency chain. `orderedIds` must be a permutation of the roadmap's
  * milestones. Sequences are bumped out of the way first so the unique
@@ -712,20 +827,50 @@ export async function reorderMilestonesOp(
         eq(roadmapMilestones.tenantId, identity.tenantId),
       ),
     );
+  // Re-sequence only — leave custom dependencies intact (they no longer get
+  // clobbered back to a linear chain on every reorder).
   for (let i = 0; i < input.orderedIds.length; i++) {
     await tx
       .update(roadmapMilestones)
-      .set({
-        sequence: i + 1,
-        dependsOnId: i === 0 ? null : input.orderedIds[i - 1]!,
-        updatedAt: sql`now()`,
-      })
+      .set({ sequence: i + 1, updatedAt: sql`now()` })
       .where(
         and(
           eq(roadmapMilestones.id, input.orderedIds[i]!),
           eq(roadmapMilestones.tenantId, identity.tenantId),
         ),
       );
+  }
+
+  // Repair pass: a milestone may now sit before the dependency it points at.
+  // Clear any edge the reorder inverted so every dependency stays strictly backward.
+  const reseq = await tx
+    .select({
+      id: roadmapMilestones.id,
+      sequence: roadmapMilestones.sequence,
+      dependsOnId: roadmapMilestones.dependsOnId,
+    })
+    .from(roadmapMilestones)
+    .where(
+      and(
+        eq(roadmapMilestones.roadmapId, input.roadmapId),
+        eq(roadmapMilestones.tenantId, identity.tenantId),
+      ),
+    );
+  const seqById = new Map(reseq.map((r) => [r.id, r.sequence]));
+  for (const r of reseq) {
+    if (!r.dependsOnId) continue;
+    const predSeq = seqById.get(r.dependsOnId);
+    if (predSeq === undefined || predSeq >= r.sequence) {
+      await tx
+        .update(roadmapMilestones)
+        .set({ dependsOnId: null, updatedAt: sql`now()` })
+        .where(
+          and(
+            eq(roadmapMilestones.id, r.id),
+            eq(roadmapMilestones.tenantId, identity.tenantId),
+          ),
+        );
+    }
   }
   return { count: input.orderedIds.length };
 }
@@ -789,7 +934,10 @@ export async function removeMilestoneOp(
   input: { readonly milestoneId: string },
 ): Promise<{ id: string }> {
   const [m] = await tx
-    .select({ roadmapId: roadmapMilestones.roadmapId })
+    .select({
+      roadmapId: roadmapMilestones.roadmapId,
+      dependsOnId: roadmapMilestones.dependsOnId,
+    })
     .from(roadmapMilestones)
     .where(
       and(
@@ -814,6 +962,19 @@ export async function removeMilestoneOp(
     throw new ValidationError("A roadmap needs at least one milestone");
   }
 
+  // Capture the milestones that depend on this one BEFORE the delete (the FK's
+  // ON DELETE SET NULL would otherwise erase the link) so we can heal them.
+  const dependents = await tx
+    .select({ id: roadmapMilestones.id })
+    .from(roadmapMilestones)
+    .where(
+      and(
+        eq(roadmapMilestones.roadmapId, m.roadmapId),
+        eq(roadmapMilestones.tenantId, identity.tenantId),
+        eq(roadmapMilestones.dependsOnId, input.milestoneId),
+      ),
+    );
+
   await tx
     .delete(roadmapMilestones)
     .where(
@@ -823,6 +984,21 @@ export async function removeMilestoneOp(
       ),
     );
 
+  // Heal: re-point each dependent at the removed milestone's own predecessor
+  // (or null), so the chain closes over the gap instead of breaking.
+  for (const dep of dependents) {
+    await tx
+      .update(roadmapMilestones)
+      .set({ dependsOnId: m.dependsOnId, updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(roadmapMilestones.id, dep.id),
+          eq(roadmapMilestones.tenantId, identity.tenantId),
+        ),
+      );
+  }
+
+  // Recompact sequences only — dependencies are preserved (and just healed above).
   const rest = ordered.map((r) => r.id).filter((id) => id !== input.milestoneId);
   await tx
     .update(roadmapMilestones)
@@ -836,11 +1012,7 @@ export async function removeMilestoneOp(
   for (let i = 0; i < rest.length; i++) {
     await tx
       .update(roadmapMilestones)
-      .set({
-        sequence: i + 1,
-        dependsOnId: i === 0 ? null : rest[i - 1]!,
-        updatedAt: sql`now()`,
-      })
+      .set({ sequence: i + 1, updatedAt: sql`now()` })
       .where(
         and(
           eq(roadmapMilestones.id, rest[i]!),
@@ -965,4 +1137,36 @@ export async function finalizeRoadmapOp(
   }
 
   return { tasks: count, programsAdopted, tierPlanCreated };
+}
+
+export interface SetArchivedInput {
+  readonly ids: readonly string[];
+  readonly archived: boolean;
+}
+
+/**
+ * Reversible bulk archive/restore. Archiving stamps archived_at (any status),
+ * which drops the roadmap from the default list view and from the Command
+ * Center milestone signals; restore clears the stamp. Milestones and their
+ * task mirrors are untouched.
+ */
+export async function setRoadmapsArchivedOp(
+  { identity, tx }: MutationContext,
+  input: SetArchivedInput,
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No rows selected");
+  const updated = await tx
+    .update(roadmaps)
+    .set({
+      archivedAt: input.archived ? sql`now()` : null,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        inArray(roadmaps.id, [...input.ids]),
+        eq(roadmaps.tenantId, identity.tenantId),
+      ),
+    )
+    .returning({ id: roadmaps.id });
+  return { count: updated.length };
 }

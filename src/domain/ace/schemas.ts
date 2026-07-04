@@ -15,6 +15,9 @@ export const stageEnum = z.enum([
   "closed_lost",
 ]);
 export const statusEnum = z.enum(["open", "won", "lost"]);
+// Win/loss capture (drizzle/0051): why a deal was lost; "" = not recorded.
+// Keep in sync with LOSS_REASONS in @/domain/ace/winloss.
+export const lossReasonEnum = z.enum(["", "competitor", "price", "timing", "no_budget", "scope", "other"]);
 export const sourceEnum = z.enum(["partner_originated", "amazon_originated", "marketplace"]);
 export const roleEnum = z.enum([
   "seller",
@@ -65,5 +68,9 @@ export const createRelationshipSchema = z.object({
 
 export const opportunityIdSchema = z.object({ opportunityId: z.string().uuid() });
 export const relationshipIdSchema = z.object({ relationshipId: z.string().uuid() });
+export const oppCaseStudySchema = z.object({
+  opportunityId: z.string().uuid(),
+  caseStudyId: z.string().uuid(),
+});
 
 export { isoDate, amount };

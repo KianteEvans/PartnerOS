@@ -64,14 +64,14 @@ export async function withTenant<T>(
     // is enforced against this assumed role.
     await tx.execute(sql.raw(`set local role ${APP_ROLE}`));
     // set_config(name, value, is_local=true) is transaction-scoped and safely
-    // parameterized (unlike SET LOCAL, which cannot bind values).
+    // parameterized (unlike SET LOCAL, which cannot bind values). All three GUCs
+    // ride ONE statement — this setup runs on every tenant transaction, so each
+    // saved round trip multiplies across a page's 3-8 withTenant blocks.
     await tx.execute(
-      sql`select set_config('app.tenant_id', ${identity.tenantId}, true)`,
+      sql`select set_config('app.tenant_id', ${identity.tenantId}, true),
+                 set_config('app.user_id', ${identity.userId}, true),
+                 set_config('app.role', ${identity.role}, true)`,
     );
-    await tx.execute(
-      sql`select set_config('app.user_id', ${identity.userId}, true)`,
-    );
-    await tx.execute(sql`select set_config('app.role', ${identity.role}, true)`);
     return fn(tx as unknown as TenantDb);
   });
 }

@@ -52,6 +52,8 @@ export interface PlanItemLike {
   readonly totalCost: number;
   readonly coFundPct: number;
   readonly brandingConfirmed?: boolean | undefined;
+  /** Projected pipeline this event drives (for the plan ROI roll-up). */
+  readonly expectedPipeline?: number | undefined;
 }
 
 export type Severity = "block" | "warn" | "ok";
@@ -163,6 +165,10 @@ export interface PlanSummary {
   readonly over: boolean;
   readonly blockedCount: number;
   readonly warnCount: number;
+  /** Sum of projected pipeline across non-blocked items. */
+  readonly projectedPipeline: number;
+  /** projectedPipeline / eligibleAsk, or null if nothing eligible. */
+  readonly planRoi: number | null;
 }
 
 /** Roll a plan's items up against available MDF for the planner header. */
@@ -173,6 +179,7 @@ export function planSummary(
 ): PlanSummary {
   let totalCost = 0;
   let eligibleAsk = 0;
+  let projectedPipeline = 0;
   let blockedCount = 0;
   let warnCount = 0;
   for (const item of items) {
@@ -182,6 +189,7 @@ export function planSummary(
     if (blocked) blockedCount += 1;
     else {
       eligibleAsk += coFunding(item.totalCost, item.coFundPct).amountToClaim;
+      projectedPipeline += item.expectedPipeline ?? 0;
       if (checks.some((c) => c.severity === "warn")) warnCount += 1;
     }
   }
@@ -194,5 +202,7 @@ export function planSummary(
     over: eligibleAsk > availableMdf,
     blockedCount,
     warnCount,
+    projectedPipeline,
+    planRoi: eligibleAsk > 0 ? Math.round((projectedPipeline / eligibleAsk) * 100) / 100 : null,
   };
 }

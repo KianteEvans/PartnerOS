@@ -94,6 +94,18 @@ const base = z.object({
   // grounds answers in official AWS docs via the AWS Knowledge MCP server. When
   // unset/empty the feature is hidden — it never blocks boot.
   ANTHROPIC_API_KEY: z.string().min(1).optional().or(z.literal("")),
+
+  // Optional. The playbook engine's delivery + scheduled runner. EMAIL_DELIVERY_URL
+  // points at the dev email stub (or a prod relay); PLAYBOOK_RUNNER_TOKEN gates the
+  // /api/cron/run-playbooks endpoint. When unset/empty the capability is simply
+  // disabled — never a boot failure.
+  EMAIL_DELIVERY_URL: z.string().url().optional().or(z.literal("")),
+  PLAYBOOK_RUNNER_TOKEN: z.string().min(1).optional().or(z.literal("")),
+
+  // Optional. Gates the cross-tenant benchmark aggregation job
+  // (/api/cron/aggregate-benchmarks). When unset/empty the endpoint is disabled;
+  // it never blocks boot. Benchmarks still render in dev from seeded cohorts.
+  BENCHMARK_AGGREGATOR_TOKEN: z.string().min(1).optional().or(z.literal("")),
 });
 
 type Base = z.infer<typeof base>;

@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { programs, programRequirements, users, evidence } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
@@ -111,6 +111,38 @@ export async function updateProgramOp(
     .returning({ id: programs.id });
   if (updated.length === 0) throw new ValidationError("Program not found");
   return { id: input.programId };
+}
+
+export interface BulkUpdateProgramInput {
+  readonly ids: readonly string[];
+  readonly status?: "pending" | "active" | "expired";
+  readonly ownerUserId?: string | null;
+  /** Server-derived YYYY-MM-DD; stamps achieved_at the first time status -> active. */
+  readonly today?: string;
+}
+
+/** Set status and/or owner across the selected portfolio programs (one tenant-scoped UPDATE). */
+export async function bulkUpdateProgramOp(
+  { identity, tx }: MutationContext,
+  input: BulkUpdateProgramInput,
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No programs selected");
+  if (input.ownerUserId) {
+    await assertOwnerInTenant(tx, identity.tenantId, input.ownerUserId);
+  }
+  const set: Record<string, unknown> = { updatedAt: sql`now()` };
+  if (input.ownerUserId !== undefined) set.ownerUserId = input.ownerUserId;
+  if (input.status !== undefined) set.status = input.status;
+  // Mirror updateProgramOp: stamp achieved_at the first time a program goes active.
+  if (input.status === "active" && input.today) {
+    set.achievedAt = sql`coalesce(${programs.achievedAt}, ${input.today})`;
+  }
+  const updated = await tx
+    .update(programs)
+    .set(set)
+    .where(and(inArray(programs.id, [...input.ids]), eq(programs.tenantId, identity.tenantId)))
+    .returning({ id: programs.id });
+  return { count: updated.length };
 }
 
 export interface UpdateRequirementInput {
@@ -233,6 +265,32 @@ export async function stageEvidenceForRequirementOp(
       );
   }
   return { evidenceId };
+}
+
+/** Attach an EXISTING evidence record to a requirement, or detach it (evidenceId=null). */
+export async function linkRequirementEvidenceOp(
+  ctx: MutationContext,
+  input: { readonly requirementId: string; readonly evidenceId: string | null },
+): Promise<{ evidenceId: string | null }> {
+  // Validates the requirement belongs to this tenant (throws otherwise).
+  await loadRequirement(ctx, input.requirementId);
+  if (input.evidenceId) {
+    const [ev] = await ctx.tx
+      .select({ id: evidence.id })
+      .from(evidence)
+      .where(and(eq(evidence.id, input.evidenceId), eq(evidence.tenantId, ctx.identity.tenantId)));
+    if (!ev) throw new ValidationError("Evidence not found");
+  }
+  await ctx.tx
+    .update(programRequirements)
+    .set({ evidenceId: input.evidenceId, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(programRequirements.id, input.requirementId),
+        eq(programRequirements.tenantId, ctx.identity.tenantId),
+      ),
+    );
+  return { evidenceId: input.evidenceId };
 }
 
 interface Candidate {

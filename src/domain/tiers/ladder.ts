@@ -8,7 +8,9 @@ import {
 /**
  * Pure tier-ladder model for the Advance stepper: where the workspace sits on the
  * registered -> select -> advanced -> premier path, and where it's heading. No DB,
- * no clock. `reqCount` is how many requirements a tier asks for (drives the chip).
+ * no clock. `reqCount` is how many GATING requirements a tier asks for (drives the
+ * chip) — informational entries like the annual fee are context, not counted, so it
+ * agrees with planSummary's met/total.
  */
 export type LadderStatus = "achieved" | "current" | "upcoming" | "target" | "locked";
 
@@ -32,7 +34,7 @@ export function tierLadder(current: TierId, target?: TierId): LadderStep[] {
     return {
       tier,
       label: TIER_LABELS[tier],
-      reqCount: thresholdsForTier(tier).length,
+      reqCount: thresholdsForTier(tier).filter((t) => !t.informational).length,
       status,
     };
   });

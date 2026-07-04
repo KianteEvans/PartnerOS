@@ -233,4 +233,85 @@ describe("programs end-to-end", () => {
       ),
     ).rejects.toThrow();
   });
+
+  // ----- Track D: bulk status/owner + requirement-evidence link -----
+
+  it("bulk-updates program status + owner, scoped to the tenant", async () => {
+    const { withSystem, withTenant } = db.client;
+    const { programs } = db.schema;
+    const rows = await withSystem(async (tx) =>
+      tx
+        .insert(programs)
+        .values([
+          { tenantId: tenantA, libraryKey: "bulk-a-1", name: "Bulk A1", programType: "Competency", deliveryModel: "consulting", fundingFit: "high", status: "pending" },
+          { tenantId: tenantA, libraryKey: "bulk-a-2", name: "Bulk A2", programType: "Competency", deliveryModel: "consulting", fundingFit: "high", status: "pending" },
+          { tenantId: tenantB, libraryKey: "bulk-b-1", name: "Bulk B1", programType: "Competency", deliveryModel: "consulting", fundingFit: "high", status: "pending" },
+        ])
+        .returning({ id: programs.id, tenantId: programs.tenantId }),
+    );
+    const aIds = rows.filter((r) => r.tenantId === tenantA).map((r) => r.id);
+    const bId = rows.find((r) => r.tenantId === tenantB)!.id;
+
+    const res = await run("program:update", "bulk-prog", (ctx) =>
+      ops.bulkUpdateProgramOp(ctx, { ids: [...aIds, bId], status: "active", ownerUserId: ownerA, today: "2026-06-23" }),
+    );
+    expect(res.body.count).toBe(2); // tenant B's row excluded by the tenant guard
+
+    const [a1row] = await withTenant(idA(), (tx) => tx.select().from(programs).where(eq(programs.id, aIds[0]!)));
+    expect(a1row!.status).toBe("active");
+    expect(a1row!.ownerUserId).toBe(ownerA);
+    expect(a1row!.achievedAt).not.toBeNull(); // stamped on first -> active
+
+    const [bRow] = await withTenant(identity(tenantB, ownerB), (tx) => tx.select().from(programs).where(eq(programs.id, bId)));
+    expect(bRow!.status).toBe("pending"); // untouched cross-tenant
+    expect(bRow!.ownerUserId).toBeNull();
+  });
+
+  it("bulk program update rejects a cross-tenant owner", async () => {
+    await expect(
+      run("program:update", "bulk-prog-badowner", (ctx) =>
+        ops.bulkUpdateProgramOp(ctx, { ids: [programId], ownerUserId: ownerB }),
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("links an existing evidence to a requirement, unlinks, and guards cross-tenant evidence", async () => {
+    const { withSystem, withTenant } = db.client;
+    const { evidence, programRequirements } = db.schema;
+    const reqId = reqIds[0]!;
+    const ev = await withSystem(async (tx) =>
+      tx
+        .insert(evidence)
+        .values([
+          { tenantId: tenantA, title: "Linkable A", status: "approved" },
+          { tenantId: tenantB, title: "Foreign B", status: "approved" },
+        ])
+        .returning({ id: evidence.id, tenantId: evidence.tenantId }),
+    );
+    const evA = ev.find((e) => e.tenantId === tenantA)!.id;
+    const evB = ev.find((e) => e.tenantId === tenantB)!.id;
+
+    const linked = await run("program:update", "link-ev", (ctx) =>
+      ops.linkRequirementEvidenceOp(ctx, { requirementId: reqId, evidenceId: evA }),
+    );
+    expect(linked.body.evidenceId).toBe(evA);
+    const [r1] = await withTenant(idA(), (tx) =>
+      tx.select().from(programRequirements).where(eq(programRequirements.id, reqId)),
+    );
+    expect(r1!.evidenceId).toBe(evA);
+
+    await run("program:update", "unlink-ev", (ctx) =>
+      ops.linkRequirementEvidenceOp(ctx, { requirementId: reqId, evidenceId: null }),
+    );
+    const [r2] = await withTenant(idA(), (tx) =>
+      tx.select().from(programRequirements).where(eq(programRequirements.id, reqId)),
+    );
+    expect(r2!.evidenceId).toBeNull();
+
+    await expect(
+      run("program:update", "link-foreign", (ctx) =>
+        ops.linkRequirementEvidenceOp(ctx, { requirementId: reqId, evidenceId: evB }),
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
 });

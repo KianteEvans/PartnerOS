@@ -68,7 +68,7 @@ export async function regenerateReport(
   let reportId = "";
   try {
     ({ reportId } = parseOrThrow(reportIdSchema, { reportId: formData.get("reportId") }));
-    await runMutation({
+    const res = await runMutation({
       permission: "report:update",
       idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
       rawBody: JSON.stringify({ reportId }),
@@ -77,11 +77,16 @@ export async function regenerateReport(
       resourceId: () => reportId,
       handler: (ctx) => regenerateReportOp(ctx, { id: reportId, today: today() }),
     });
+    revalidatePath(`/reports/${reportId}`);
+    const changed = res.body.changed;
+    const detail =
+      changed.length === 0
+        ? "Snapshot regenerated — no metric changes since the last run."
+        : `Snapshot regenerated · changed: ${changed.slice(0, 5).join(", ")}${changed.length > 5 ? "…" : ""}`;
+    return { ok: true, detail };
   } catch (err) {
     return failure(err);
   }
-  revalidatePath(`/reports/${reportId}`);
-  return { ok: true };
 }
 
 export async function submitReportForReview(

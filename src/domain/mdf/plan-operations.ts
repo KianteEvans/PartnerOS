@@ -55,6 +55,7 @@ export async function updatePlanOp(
 export interface PlanItemInput {
   readonly planId: string;
   readonly title: string;
+  readonly description: string;
   readonly catalogKey: string | null;
   readonly totalCost: number;
   readonly coFundPct: number;
@@ -84,6 +85,7 @@ export async function addPlanItemOp(
       tenantId: ctx.identity.tenantId,
       planId: input.planId,
       title: input.title,
+      description: input.description,
       catalogKey: input.catalogKey,
       activityType: deriveActivityType(input.catalogKey),
       totalCost: input.totalCost,
@@ -106,6 +108,7 @@ export async function updatePlanItemOp(
     .update(mdfPlanItems)
     .set({
       title: input.title,
+      description: input.description,
       catalogKey: input.catalogKey,
       activityType: deriveActivityType(input.catalogKey),
       totalCost: input.totalCost,
@@ -133,34 +136,25 @@ export async function removePlanItemOp(
   return { id: input.id };
 }
 
-/**
- * Convert an eligible plan item into a draft MDF request (reusing `createRequestOp`),
- * grounding the request in the catalog and linking the item back. Refuses a blocked
- * item (hard AWS-rule violation) and a double-convert.
- */
-export async function convertPlanItemToRequestOp(
-  ctx: MutationContext,
-  input: { readonly id: string; readonly today: string },
-): Promise<{ requestId: string; planId: string }> {
-  const { identity, tx } = ctx;
-  const [item] = await tx
-    .select()
-    .from(mdfPlanItems)
-    .where(and(eq(mdfPlanItems.id, input.id), eq(mdfPlanItems.tenantId, identity.tenantId)));
-  if (!item) throw new ValidationError("Plan item not found");
-  if (item.requestId) throw new ValidationError("This item has already been converted to a request");
+type PlanItemRow = typeof mdfPlanItems.$inferSelect;
 
-  const likeness: PlanItemLike = {
+function itemLikeness(item: PlanItemRow): PlanItemLike {
+  return {
     catalogKey: item.catalogKey,
     startDate: item.startDate,
     endDate: item.endDate,
     totalCost: item.totalCost,
     coFundPct: item.coFundPct,
   };
-  if (isBlocked(likeness, input.today)) {
-    throw new ValidationError("Resolve the blocking AWS-rule issues before converting this item");
-  }
+}
 
+/**
+ * Convert one already-loaded, eligible item into a draft MDF request (reusing
+ * `createRequestOp`), grounding the request in the catalog and linking the item
+ * back. The caller guards eligibility (blocked / already-converted).
+ */
+async function convertItem(ctx: MutationContext, item: PlanItemRow): Promise<{ requestId: string }> {
+  const { identity, tx } = ctx;
   const ask = coFunding(item.totalCost, item.coFundPct).amountToClaim;
   const { claimBy } = derivedDeadlines(item.startDate, item.endDate);
 
@@ -176,7 +170,6 @@ export async function convertPlanItemToRequestOp(
     opportunityRef: null,
   });
 
-  // Ground the new request in the catalog + carry the full activity cost.
   await tx
     .update(mdfRequests)
     .set({ catalogKey: item.catalogKey, totalCost: item.totalCost, updatedAt: sql`now()` })
@@ -187,5 +180,48 @@ export async function convertPlanItemToRequestOp(
     .set({ requestId, updatedAt: sql`now()` })
     .where(and(eq(mdfPlanItems.id, item.id), eq(mdfPlanItems.tenantId, identity.tenantId)));
 
+  return { requestId };
+}
+
+/** Convert a single eligible plan item; refuses a blocked item or a double-convert. */
+export async function convertPlanItemToRequestOp(
+  ctx: MutationContext,
+  input: { readonly id: string; readonly today: string },
+): Promise<{ requestId: string; planId: string }> {
+  const { identity, tx } = ctx;
+  const [item] = await tx
+    .select()
+    .from(mdfPlanItems)
+    .where(and(eq(mdfPlanItems.id, input.id), eq(mdfPlanItems.tenantId, identity.tenantId)));
+  if (!item) throw new ValidationError("Plan item not found");
+  if (item.requestId) throw new ValidationError("This item has already been converted to a request");
+  if (isBlocked(itemLikeness(item), input.today)) {
+    throw new ValidationError("Resolve the blocking AWS-rule issues before converting this item");
+  }
+  const { requestId } = await convertItem(ctx, item);
   return { requestId, planId: item.planId };
+}
+
+/**
+ * Convert ALL eligible (non-blocked, not-yet-converted) events in a plan into draft
+ * requests. Blocked/converted items are skipped; returns how many were converted.
+ */
+export async function bulkConvertPlanItemsOp(
+  ctx: MutationContext,
+  input: { readonly planId: string; readonly today: string },
+): Promise<{ count: number }> {
+  const { identity, tx } = ctx;
+  await assertPlanInTenant(ctx, input.planId);
+  const items = await tx
+    .select()
+    .from(mdfPlanItems)
+    .where(and(eq(mdfPlanItems.planId, input.planId), eq(mdfPlanItems.tenantId, identity.tenantId)));
+  let count = 0;
+  for (const item of items) {
+    if (item.requestId) continue;
+    if (isBlocked(itemLikeness(item), input.today)) continue;
+    await convertItem(ctx, item);
+    count += 1;
+  }
+  return { count };
 }

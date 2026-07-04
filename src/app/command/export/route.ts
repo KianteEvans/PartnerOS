@@ -16,7 +16,7 @@ export async function GET(): Promise<Response> {
     const today = new Date().toISOString().slice(0, 10);
 
     const data = await loadCommandData(identity);
-    const cc = buildCommandCenter(data.inputs, today);
+    const cc = buildCommandCenter(data.inputs, today, data.dismissedIds);
     const emailById = new Map(data.members.map((m) => [m.id, m.email]));
     const owner = (id: string | null) => (id ? emailById.get(id) ?? "" : "");
 

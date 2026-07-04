@@ -30,7 +30,8 @@ const EVIDENCE_TYPE_WORDS: Record<string, readonly string[]> = {
   reference: ["reference", "satisfaction", "launched", "opportunity", "testimonial"],
 };
 
-function tokens(s: string): string[] {
+/** Shared keyword tokenizer (also used by ace/case-study-match.ts). */
+export function tokens(s: string): string[] {
   return s
     .toLowerCase()
     .split(/[^a-z0-9]+/)

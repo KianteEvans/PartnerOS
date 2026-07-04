@@ -1,5 +1,14 @@
-import { and, eq, sql } from "drizzle-orm";
-import { opportunities, aceRelationships, aceInteractions, users, solutions, programs } from "@/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import {
+  opportunities,
+  aceRelationships,
+  aceInteractions,
+  users,
+  solutions,
+  programs,
+  caseStudies,
+  opportunityCaseStudies,
+} from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
 import { createSourcedTask } from "@/domain/tasks/operations";
@@ -117,6 +126,8 @@ export interface UpdateOpportunityInput {
   readonly awsContactId?: string | null;
   readonly solutionId?: string | null;
   readonly programId?: string | null;
+  /** Why the deal was lost (app-validated catalog; "" clears). */
+  readonly lossReason?: string;
 }
 
 export async function updateOpportunityOp(
@@ -125,7 +136,7 @@ export async function updateOpportunityOp(
 ): Promise<{ id: string }> {
   const { identity, tx } = ctx;
   const [current] = await tx
-    .select({ routingStatus: opportunities.routingStatus })
+    .select({ routingStatus: opportunities.routingStatus, status: opportunities.status })
     .from(opportunities)
     .where(and(eq(opportunities.id, input.id), eq(opportunities.tenantId, identity.tenantId)));
   if (!current) throw new ValidationError("Opportunity not found");
@@ -146,6 +157,20 @@ export async function updateOpportunityOp(
   if (input.awsContactId !== undefined) set.awsContactId = input.awsContactId;
   if (input.solutionId !== undefined) set.solutionId = input.solutionId;
   if (input.programId !== undefined) set.programId = input.programId;
+  if (input.lossReason !== undefined) set.lossReason = input.lossReason;
+
+  // Win/loss capture (drizzle/0051): stamp the ACTUAL close time only on a status
+  // TRANSITION (re-saving an already-closed deal must not re-stamp it). Winning or
+  // reopening clears the loss reason; reopening clears the close stamp too.
+  if (input.status !== undefined && input.status !== current.status) {
+    if (input.status === "won" || input.status === "lost") {
+      set.closedAt = sql`now()`;
+      if (input.status === "won") set.lossReason = "";
+    } else {
+      set.closedAt = null;
+      set.lossReason = "";
+    }
+  }
 
   // Assigning an owner to an un-routed opportunity routes it.
   if (input.ownerUserId && current.routingStatus === "unrouted") {
@@ -157,6 +182,32 @@ export async function updateOpportunityOp(
     .set(set)
     .where(and(eq(opportunities.id, input.id), eq(opportunities.tenantId, identity.tenantId)));
   return { id: input.id };
+}
+
+export interface BulkUpdateOpportunityInput {
+  readonly ids: readonly string[];
+  readonly ownerUserId?: string | null;
+}
+
+/** Reassign the owner across the selected opportunities (one tenant-scoped UPDATE). */
+export async function bulkUpdateOpportunityOp(
+  { identity, tx }: MutationContext,
+  input: BulkUpdateOpportunityInput,
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No opportunities selected");
+  if (input.ownerUserId) await assertOwnerInTenant(tx, identity.tenantId, input.ownerUserId);
+  const set: Record<string, unknown> = { updatedAt: sql`now()` };
+  if (input.ownerUserId !== undefined) set.ownerUserId = input.ownerUserId;
+  // Mirror updateOpportunityOp: assigning an owner routes any still-unrouted opp.
+  if (input.ownerUserId) {
+    set.routingStatus = sql`case when ${opportunities.routingStatus} = 'unrouted' then 'routed' else ${opportunities.routingStatus} end`;
+  }
+  const updated = await tx
+    .update(opportunities)
+    .set(set)
+    .where(and(inArray(opportunities.id, [...input.ids]), eq(opportunities.tenantId, identity.tenantId)))
+    .returning({ id: opportunities.id });
+  return { count: updated.length };
 }
 
 /**
@@ -301,4 +352,65 @@ export async function logInteractionOp(
     })
     .where(and(eq(aceRelationships.id, input.contactId), eq(aceRelationships.tenantId, identity.tenantId)));
   return { id: row!.id };
+}
+
+export interface OppCaseStudyInput {
+  readonly opportunityId: string;
+  readonly caseStudyId: string;
+}
+
+/**
+ * Pin a case study to a co-sell deal. Idempotent (unique tenant+opp+study);
+ * both rows are verified against the tenant explicitly (RLS + explicit check).
+ */
+export async function attachOppCaseStudyOp(
+  { identity, tx }: MutationContext,
+  input: OppCaseStudyInput,
+): Promise<{ id: string | null }> {
+  const t = identity.tenantId;
+  const [opp] = await tx
+    .select({ id: opportunities.id })
+    .from(opportunities)
+    .where(and(eq(opportunities.id, input.opportunityId), eq(opportunities.tenantId, t)));
+  if (!opp) throw new ValidationError("Opportunity not found");
+  const [cs] = await tx
+    .select({ id: caseStudies.id })
+    .from(caseStudies)
+    .where(and(eq(caseStudies.id, input.caseStudyId), eq(caseStudies.tenantId, t)));
+  if (!cs) throw new ValidationError("Case study not found");
+
+  const inserted = await tx
+    .insert(opportunityCaseStudies)
+    .values({
+      tenantId: t,
+      opportunityId: input.opportunityId,
+      caseStudyId: input.caseStudyId,
+      createdBy: identity.userId,
+    })
+    .onConflictDoNothing({
+      target: [
+        opportunityCaseStudies.tenantId,
+        opportunityCaseStudies.opportunityId,
+        opportunityCaseStudies.caseStudyId,
+      ],
+    })
+    .returning({ id: opportunityCaseStudies.id });
+  return { id: inserted[0]?.id ?? null };
+}
+
+/** Unpin a case study from a deal. Idempotent. */
+export async function detachOppCaseStudyOp(
+  { identity, tx }: MutationContext,
+  input: OppCaseStudyInput,
+): Promise<{ ok: true }> {
+  await tx
+    .delete(opportunityCaseStudies)
+    .where(
+      and(
+        eq(opportunityCaseStudies.opportunityId, input.opportunityId),
+        eq(opportunityCaseStudies.caseStudyId, input.caseStudyId),
+        eq(opportunityCaseStudies.tenantId, identity.tenantId),
+      ),
+    );
+  return { ok: true };
 }

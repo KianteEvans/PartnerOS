@@ -7,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   IconCommand,
   IconAssessments,
@@ -83,6 +83,7 @@ interface Item {
 
 export function CommandPalette(): ReactNode {
   const router = useRouter();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
@@ -162,6 +163,19 @@ export function CommandPalette(): ReactNode {
   const results: Item[] = [...staticMatches, ...recordItems];
   const active = Math.min(idx, Math.max(0, results.length - 1));
 
+  // "You are here": the longest Go-to href that prefixes the current path, so
+  // /programs/tiers marks Tiers (not Program Management) and /programs marks Programs.
+  let currentId: string | null = null;
+  let currentLen = -1;
+  for (const c of COMMANDS) {
+    if (c.group !== "Go to") continue;
+    const onIt = c.href === "/" ? pathname === "/" : pathname === c.href || pathname.startsWith(c.href + "/");
+    if (onIt && c.href.length > currentLen) {
+      currentLen = c.href.length;
+      currentId = c.id;
+    }
+  }
+
   function go(href: string): void {
     setOpen(false);
     router.push(href);
@@ -236,35 +250,42 @@ export function CommandPalette(): ReactNode {
               {loading ? "Searching…" : "No matches."}
             </li>
           ) : (
-            results.map((c, i) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  onMouseEnter={() => setIdx(i)}
-                  onClick={() => go(c.href)}
-                  style={{
-                    width: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "9px 12px",
-                    borderRadius: 8,
-                    border: "none",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 14,
-                    color: i === active ? "var(--accent)" : "var(--text)",
-                    background: i === active ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent",
-                  }}
-                >
-                  <span style={{ width: 16, display: "inline-flex", color: i === active ? "var(--accent)" : "var(--muted)" }}>
-                    {c.Icon ? <c.Icon size={16} /> : null}
-                  </span>
-                  <span style={{ flex: 1 }}>{c.label}</span>
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{c.group}</span>
-                </button>
-              </li>
-            ))
+            results.map((c, i) => {
+              const isCurrent = c.id === currentId;
+              return (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onMouseEnter={() => setIdx(i)}
+                    onClick={() => go(c.href)}
+                    aria-current={isCurrent ? "page" : undefined}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      borderLeft: isCurrent ? "2px solid var(--section-accent)" : "2px solid transparent",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 14,
+                      color: i === active ? "var(--accent)" : "var(--text)",
+                      background: i === active ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent",
+                    }}
+                  >
+                    <span style={{ width: 16, display: "inline-flex", color: i === active ? "var(--accent)" : "var(--muted)" }}>
+                      {c.Icon ? <c.Icon size={16} /> : null}
+                    </span>
+                    <span style={{ flex: 1 }}>{c.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: isCurrent ? 600 : 400, color: isCurrent ? "var(--section-accent)" : "var(--muted)" }}>
+                      {isCurrent ? "Current" : c.group}
+                    </span>
+                  </button>
+                </li>
+              );
+            })
           )}
         </ul>
       </div>

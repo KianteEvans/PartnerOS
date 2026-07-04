@@ -124,4 +124,10 @@ export const replanRoadmapSchema = z.object({
   startDate: isoDate,
 });
 
+/** A milestone dependency field: "" clears it (null), else a uuid. Mirrors ownerUserId. */
+export const optionalMilestoneRef = z.preprocess(
+  (v) => (v === "" || v == null ? null : v),
+  z.string().uuid().nullable(),
+);
+
 export { isoDate };

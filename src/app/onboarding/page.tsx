@@ -36,16 +36,8 @@ import {
   type PathId,
 } from "@/domain/onboarding/catalog";
 import { PRESET_LABELS } from "@/domain/assessments/catalog";
+import { formLabel as labelStyle, formLabelSpan as spanStyle, formControl as controlStyle } from "@/components/ui/form-styles";
 
-const labelStyle = { display: "grid", gap: 4, fontSize: 13 } as const;
-const spanStyle = { color: "var(--muted)" } as const;
-const controlStyle = {
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  padding: "8px 10px",
-  color: "var(--text)",
-} as const;
 
 type Row = typeof onboarding.$inferSelect;
 

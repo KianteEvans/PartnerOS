@@ -13,16 +13,20 @@ export function Panel({
   title,
   actions,
   accent,
+  id,
   children,
 }: {
   title?: string;
   actions?: ReactNode;
   accent?: Tone | string;
+  /** Anchor target (e.g. deep links like /ace/<id>#case-studies). */
+  id?: string;
   children: ReactNode;
 }): ReactNode {
   const accentColor = accent ? ((TONE_VAR as Record<string, string>)[accent] ?? accent) : undefined;
   return (
     <section
+      id={id}
       style={{
         background: "var(--panel)",
         border: "1px solid var(--border)",

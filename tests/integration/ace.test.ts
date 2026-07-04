@@ -241,4 +241,45 @@ describe("ace end-to-end", () => {
       ),
     ).rejects.toThrow();
   });
+
+  // ----- Track D: bulk owner reassignment -----
+
+  it("bulk-reassigns opportunity owner and routes unrouted ones, tenant-scoped", async () => {
+    const mk = (k: string, name: string, who = idA) =>
+      run("ace:create", k, (ctx) =>
+        ops.createOpportunityOp(ctx, {
+          name, accountName: "Acme", stage: "prospect", amount: 10_000,
+          source: "partner_originated", awsSeller: null, awsContactId: null, closeDate: null,
+        }),
+        who,
+      );
+    const a1 = await mk("bulk-opp-a1", "Bulk A1");
+    const a2 = await mk("bulk-opp-a2", "Bulk A2");
+    const b1 = await mk("bulk-opp-b1", "Bulk B1", () => identity(tenantB, ownerB));
+
+    const res = await run("ace:update", "bulk-opp", (ctx) =>
+      ops.bulkUpdateOpportunityOp(ctx, { ids: [a1.body.id, a2.body.id, b1.body.id], ownerUserId: memberA }),
+    );
+    expect(res.body.count).toBe(2); // tenant B's row excluded by the tenant guard
+
+    const { withTenant } = db.client;
+    const { opportunities } = db.schema;
+    const [oa1] = await withTenant(idA(), (tx) => tx.select().from(opportunities).where(eq(opportunities.id, a1.body.id)));
+    expect(oa1!.ownerUserId).toBe(memberA);
+    expect(oa1!.routingStatus).toBe("routed"); // assigning an owner routed the unrouted opp
+
+    const [ob1] = await withTenant(identity(tenantB, ownerB), (tx) =>
+      tx.select().from(opportunities).where(eq(opportunities.id, b1.body.id)),
+    );
+    expect(ob1!.ownerUserId).toBeNull(); // untouched cross-tenant
+    expect(ob1!.routingStatus).toBe("unrouted");
+  });
+
+  it("bulk opportunity update rejects a cross-tenant owner", async () => {
+    await expect(
+      run("ace:update", "bulk-opp-badowner", (ctx) =>
+        ops.bulkUpdateOpportunityOp(ctx, { ids: [oppId], ownerUserId: ownerB }),
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
 });

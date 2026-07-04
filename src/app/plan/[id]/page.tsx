@@ -452,7 +452,7 @@ function ScoredResults({
             <MutationForm
               action={approveAllRecommendations}
               submitLabel={`Approve all (${pendingCount})`}
-              successMessage="Recommendations approved."
+              successMessage="Approved — Tasks created in Task Manager."
               hidden={{ assessmentId }}
             />
           ) : undefined
@@ -476,7 +476,16 @@ function ScoredResults({
                 <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 10px" }}>{rec.detail}</p>
                 {rec.status === "pending" ? (
                   <div style={{ display: "flex", gap: 8 }}>
-                    <MutationForm action={approveRecommendation} submitLabel="Approve" hidden={{ recommendationId: rec.id, assessmentId }} />
+                    <MutationForm
+                      action={approveRecommendation}
+                      submitLabel="Approve"
+                      successMessage={
+                        rec.type === "evidence_gap"
+                          ? "Approved → created a Task and an Evidence record."
+                          : "Approved → created a Task in Task Manager."
+                      }
+                      hidden={{ recommendationId: rec.id, assessmentId }}
+                    />
                     <MutationForm action={rejectRecommendation} submitLabel="Reject" variant="secondary" hidden={{ recommendationId: rec.id, assessmentId }} />
                   </div>
                 ) : rec.status === "approved" ? (

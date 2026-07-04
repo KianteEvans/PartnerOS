@@ -10,14 +10,18 @@ export function Card({
   compact = false,
   interactive = false,
   style,
+  id,
 }: {
   children: ReactNode;
   compact?: boolean;
   interactive?: boolean;
   style?: CSSProperties;
+  /** Anchor id (e.g. for deep-linking a decision to this exact row). Adds scroll-margin. */
+  id?: string;
 }): ReactNode {
   return (
     <div
+      id={id}
       className={interactive ? "card-interactive" : undefined}
       style={{
         background: "var(--panel)",
@@ -28,6 +32,8 @@ export function Card({
         transition: interactive
           ? "transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease"
           : undefined,
+        // Keep an anchored row clear of the sticky top bar when deep-linked.
+        ...(id ? { scrollMarginTop: 84 } : {}),
         ...style,
       }}
     >

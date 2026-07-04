@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
-import { mdfRequests, evidence, tasks, users } from "@/db/schema";
+import { mdfRequests, mdfPlanItems, evidence, tasks, users } from "@/db/schema";
 import { can } from "@/authz/permissions";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
@@ -33,6 +33,7 @@ import { daysBetween } from "@/domain/dates";
 import { MdfLifecycleStepper } from "@/app/mdf/MdfLifecycleStepper";
 import { activityByKey, APPROVED_ACTIVITIES, INELIGIBLE_ACTIVITIES } from "@/domain/mdf/activity-catalog";
 import { coFunding, derivedDeadlines, complianceChecks } from "@/domain/mdf/compliance";
+import { moneyOrDash as money } from "@/domain/format";
 
 const SECTION = "var(--section-accent)";
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -52,7 +53,6 @@ const controlStyle = {
   color: "var(--text)",
   fontSize: 13,
 } as const;
-const money = (n: number | null): string => (n == null ? "—" : `$${n.toLocaleString()}`);
 
 export default async function MdfDetailPage({
   params,
@@ -70,10 +70,12 @@ export default async function MdfDetailPage({
         req: mdfRequests,
         evidenceStatus: evidence.status,
         taskStatus: tasks.status,
+        planId: mdfPlanItems.planId,
       })
       .from(mdfRequests)
       .leftJoin(evidence, eq(evidence.id, mdfRequests.evidenceId))
       .leftJoin(tasks, eq(tasks.id, mdfRequests.taskId))
+      .leftJoin(mdfPlanItems, eq(mdfPlanItems.requestId, mdfRequests.id))
       .where(and(eq(mdfRequests.id, id), eq(mdfRequests.tenantId, identity.tenantId)));
     if (!r) return null;
     const members = await tx.select({ id: users.id, email: users.email }).from(users).where(eq(users.tenantId, identity.tenantId));
@@ -145,6 +147,15 @@ export default async function MdfDetailPage({
           ) : undefined
         }
       />
+
+      {data.planId && (
+        <Callout tone="info">
+          Converted from a marketing plan ·{" "}
+          <Link href={`/mdf/plan/${data.planId}`} style={{ color: "var(--accent)", fontWeight: 600 }}>
+            Open the plan →
+          </Link>
+        </Callout>
+      )}
 
       {atRisk && daysToDeadline !== null && (
         <Callout

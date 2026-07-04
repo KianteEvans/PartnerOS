@@ -4,11 +4,16 @@ import { and, asc, eq } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
+import { deferAfterResponse } from "@/http/defer";
 import { roadmaps, roadmapMilestones, users, programs, tierRequirements, tenants } from "@/db/schema";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { statusTone, type Tone } from "@/components/ui/Badge";
+import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
+import { RingGauge } from "@/components/ui/RingGauge";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { Callout } from "@/components/ui/Callout";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import {
@@ -19,7 +24,22 @@ import {
   replanRoadmap,
 } from "@/domain/roadmaps/actions";
 import { PROGRAM_LIBRARY } from "@/domain/programs/library";
-import { TIER_LABELS, tiersAbove, type TierId } from "@/domain/tiers/catalog";
+import { TIER_LABELS, tiersAbove, thresholdsForTier, type TierId } from "@/domain/tiers/catalog";
+import {
+  targetTierFromMilestones,
+  tierCoverage,
+  type CoverageState,
+  type CoverageSummary,
+} from "@/domain/roadmaps/coverage";
+import { captureRoadmapSnapshot, loadRoadmapTrends } from "@/domain/roadmaps/trends-load";
+import { reconcileMilestonesOp } from "@/domain/roadmaps/operations";
+import { can, type Role } from "@/authz/permissions";
+import type { MutationContext } from "@/gate/mutation-gate";
+import { computeForecast } from "@/domain/roadmaps/forecast";
+import { loadRoadmapRecommendations } from "@/domain/roadmaps/recommend-load";
+import { RoadmapTrajectory } from "@/app/plan/roadmaps/RoadmapTrajectory";
+import { RoadmapNarrative } from "@/components/ui/RoadmapNarrative";
+import { env } from "@/env";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -69,6 +89,19 @@ export default async function RoadmapDetailPage({
       .from(roadmaps)
       .where(and(eq(roadmaps.id, id), eq(roadmaps.tenantId, identity.tenantId)));
     if (!roadmap) return null;
+    // Live reconciliation: auto-advance satisfied program/tier milestones to done
+    // (best-effort, write-gated to roadmap:update users) so the plan reflects reality
+    // the moment it's viewed. Runs before the milestone read below so it reflects the
+    // advancement; errors never break the page.
+    let reconciled: readonly { title: string; reason: string }[] = [];
+    if (can(identity.role as Role, "roadmap:update")) {
+      try {
+        const res = await reconcileMilestonesOp({ identity, tx } as MutationContext, { roadmapId: id });
+        reconciled = res.advanced;
+      } catch {
+        // swallow — a living plan should never take down its own page.
+      }
+    }
     const milestones = await tx
       .select()
       .from(roadmapMilestones)
@@ -107,11 +140,12 @@ export default async function RoadmapDetailPage({
       adoptedPrograms,
       tierReqs,
       currentTier: (tenantRow?.tier ?? "registered") as TierId,
+      reconciled,
     };
   });
 
   if (!data) notFound();
-  const { roadmap, milestones, members, adoptedPrograms, tierReqs, currentTier } =
+  const { roadmap, milestones, members, adoptedPrograms, tierReqs, currentTier, reconciled } =
     data;
   const isDraft = roadmap.status === "draft";
   const tierOptions = tiersAbove(currentTier).map((tid) => ({
@@ -120,6 +154,50 @@ export default async function RoadmapDetailPage({
   }));
   const today = new Date().toISOString().slice(0, 10);
   const prog = roadmapProgress(milestones, today);
+
+  // Theme A: tier-readiness coverage — null when this roadmap targets no tier.
+  const targetTier = targetTierFromMilestones(milestones);
+  const cov = targetTier ? tierCoverage(milestones, thresholdsForTier(targetTier), targetTier) : null;
+
+  // Theme B: record today's burn-up point (best-effort, deferred past the
+  // response) and forecast the trajectory; today's point is overlaid in memory
+  // so the burn-up still ends at "now" before the write lands.
+  if (milestones.length > 0) {
+    await deferAfterResponse(() =>
+      captureRoadmapSnapshot(
+        identity,
+        roadmap.id,
+        { done: prog.done, total: prog.total, overdue: prog.overdue, inProgress: prog.inProgress },
+        today,
+      ),
+    );
+  }
+  const stored = milestones.length > 0 ? await loadRoadmapTrends(identity, roadmap.id) : [];
+  const series =
+    milestones.length === 0
+      ? stored
+      : stored[stored.length - 1]?.capturedOn === today
+        ? [...stored.slice(0, -1), { capturedOn: today, done: prog.done }]
+        : [...stored, { capturedOn: today, done: prog.done }];
+  const forecast = computeForecast({
+    milestones: milestones.map((mm) => ({ status: mm.status, targetDate: mm.targetDate, title: mm.title })),
+    snapshots: series,
+    today,
+  });
+  const burnup = series.map((p) => p.done);
+
+  // Theme C: programs worth adding (draft only; exclude ones already on the plan).
+  const grow = isDraft
+    ? await loadRoadmapRecommendations(
+        identity,
+        today,
+        new Set(
+          milestones
+            .filter((mm) => mm.originKind === "program" && mm.originRef)
+            .map((mm) => mm.originRef),
+        ),
+      )
+    : null;
 
   // Roll real program / tier progress back onto each composed milestone.
   const programByKey = new Map(adoptedPrograms.map((p) => [p.libraryKey, p]));
@@ -167,6 +245,16 @@ export default async function RoadmapDetailPage({
         }
       />
 
+      {reconciled.length > 0 && (
+        <Callout
+          tone="ok"
+          title={`${reconciled.length} milestone${reconciled.length === 1 ? "" : "s"} auto-completed from live state`}
+        >
+          {reconciled.map((r) => `${r.title} (${r.reason.toLowerCase()})`).join("; ")}. These reflect your real
+          program / tier state — adjust any in the milestone editor if needed.
+        </Callout>
+      )}
+
       {roadmap.objective && (
         <p style={{ fontSize: 14, margin: 0 }}>{roadmap.objective}</p>
       )}
@@ -176,6 +264,18 @@ export default async function RoadmapDetailPage({
           <RoadmapProgressHeader progress={prog} />
         </Panel>
       )}
+
+      {cov && (
+        <TierReadinessPanel
+          cov={cov}
+          tierLabel={TIER_LABELS[cov.tier]}
+          isDraft={isDraft}
+          roadmapId={roadmap.id}
+          aiEnabled={Boolean(env.ANTHROPIC_API_KEY)}
+        />
+      )}
+
+      {milestones.length > 0 && <RoadmapTrajectory forecast={forecast} series={burnup} />}
 
       <Panel title="Share & iterate">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -292,11 +392,25 @@ export default async function RoadmapDetailPage({
             successMessage="Plan updated."
             hidden={{ roadmapId: roadmap.id }}
           >
+            {grow && grow.recommendations.length > 0 ? (
+              <fieldset style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>
+                <legend style={{ fontSize: 12, color: "var(--section-accent)", padding: 0, fontWeight: 600 }}>
+                  Recommended for you
+                </legend>
+                {grow.recommendations.slice(0, 6).map((r) => (
+                  <label key={r.key} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                    <input type="checkbox" name="programKeys" value={r.key} />
+                    <span>{r.name}</span>
+                    <Badge tone="info">{r.programType}</Badge>
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
             <fieldset
               style={{ border: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}
             >
               <legend style={{ fontSize: 12, color: "var(--muted)", padding: 0 }}>
-                Programs &amp; competencies
+                All programs &amp; competencies
               </legend>
               {PROGRAM_LIBRARY.map((p) => (
                 <label
@@ -351,5 +465,113 @@ export default async function RoadmapDetailPage({
         </Panel>
       )}
     </PageShell>
+  );
+}
+
+const COVERAGE_TONE: Record<CoverageState, Tone> = {
+  covered: "ok",
+  in_progress: "info",
+  planned: "neutral",
+  uncovered: "danger",
+};
+const COVERAGE_LABEL: Record<CoverageState, string> = {
+  covered: "Covered",
+  in_progress: "In progress",
+  planned: "Planned",
+  uncovered: "Uncovered",
+};
+function tierRingColor(pct: number): string {
+  return pct >= 75 ? "var(--ok)" : pct >= 40 ? "var(--warn)" : "var(--danger)";
+}
+
+/**
+ * Tier-readiness panel: does this roadmap actually close the gap to its target
+ * AWS tier? Coverage ring + per-requirement state + an "add the uncovered ones"
+ * nudge that recomposes the missing tier-requirement milestones (draft only).
+ */
+function TierReadinessPanel({
+  cov,
+  tierLabel,
+  isDraft,
+  roadmapId,
+  aiEnabled,
+}: {
+  cov: CoverageSummary;
+  tierLabel: string;
+  isDraft: boolean;
+  roadmapId: string;
+  aiEnabled: boolean;
+}): ReactNode {
+  return (
+    <Panel title="Tier readiness" accent="var(--section-accent)">
+      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, minWidth: 140 }}>
+          <RingGauge value={cov.percent} color={tierRingColor(cov.percent)} caption="covered" size={120} />
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>{tierLabel} tier</span>
+        </div>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <MetricStrip min={150}>
+            <MetricCard label="Requirements" value={String(cov.total)} />
+            <MetricCard
+              label="Have a milestone"
+              value={String(cov.withMilestone)}
+              tone={cov.withMilestone === cov.total ? "ok" : "neutral"}
+            />
+            <MetricCard label="Done" value={String(cov.covered)} tone={cov.covered > 0 ? "ok" : "neutral"} />
+            <MetricCard
+              label="Tier-ready"
+              value={cov.projectedReadyDate ?? "—"}
+              sub={cov.projectedComplete ? "all covered" : "latest milestone target"}
+            />
+          </MetricStrip>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 6, marginTop: 14 }}>
+        {cov.requirements.map((r) => (
+          <div
+            key={r.key}
+            style={{
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              fontSize: 13,
+              paddingBottom: 6,
+              borderBottom: "1px solid var(--border)",
+            }}
+          >
+            <Badge tone={COVERAGE_TONE[r.state]}>{COVERAGE_LABEL[r.state]}</Badge>
+            <span>{r.label}</span>
+            {r.targetDate ? (
+              <span style={{ color: "var(--muted)", marginLeft: "auto", fontSize: 12 }}>{r.targetDate}</span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {cov.uncovered > 0 && isDraft ? (
+        <div style={{ marginTop: 12 }}>
+          <Callout tone="warn" title={`${cov.uncovered} uncovered tier requirement${cov.uncovered === 1 ? "" : "s"}`}>
+            <div style={{ display: "grid", gap: 8 }}>
+              <span>
+                These {tierLabel} requirements have no milestone yet. Add them to close the gap to the tier.
+              </span>
+              <div>
+                <MutationForm
+                  action={recomposeRoadmap}
+                  submitLabel={`Add ${cov.uncovered} requirement${cov.uncovered === 1 ? "" : "s"}`}
+                  variant="secondary"
+                  hidden={{ roadmapId, targetTier: cov.tier }}
+                />
+              </div>
+            </div>
+          </Callout>
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+        <RoadmapNarrative enabled={aiEnabled} roadmapId={roadmapId} />
+      </div>
+    </Panel>
   );
 }

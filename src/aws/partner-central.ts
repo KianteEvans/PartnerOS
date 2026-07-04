@@ -1,10 +1,10 @@
-import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import {
   PartnerCentralSellingClient,
   ListOpportunitiesCommand,
   GetAwsOpportunitySummaryCommand,
   type OpportunitySummary,
 } from "@aws-sdk/client-partnercentral-selling";
+import { assumeTenantRole } from "@/aws/assume-role";
 import type { AwsOpportunitySummaryResult } from "@/domain/aws/mapping";
 
 /**
@@ -27,31 +27,6 @@ export interface AwsConnectionConfig {
 const MAX_PAGES = 10; // safety bound on pagination
 const TEAM_CONCURRENCY = 4; // parallel GetAwsOpportunitySummary calls
 const TEAM_MAX_OPPS = 200; // ceiling on per-opp GETs per sync (= MAX_PAGES x MaxResults)
-
-async function assumeTenantRole(cfg: AwsConnectionConfig): Promise<{
-  accessKeyId: string;
-  secretAccessKey: string;
-  sessionToken: string;
-}> {
-  const sts = new STSClient({ region: cfg.region });
-  const res = await sts.send(
-    new AssumeRoleCommand({
-      RoleArn: cfg.roleArn,
-      ExternalId: cfg.externalId,
-      RoleSessionName: `partneros-${cfg.tenantId}`.slice(0, 64),
-      DurationSeconds: 900,
-    }),
-  );
-  const c = res.Credentials;
-  if (!c?.AccessKeyId || !c.SecretAccessKey || !c.SessionToken) {
-    throw new Error("AssumeRole returned no credentials");
-  }
-  return {
-    accessKeyId: c.AccessKeyId,
-    secretAccessKey: c.SecretAccessKey,
-    sessionToken: c.SessionToken,
-  };
-}
 
 /** List Partner Central co-sell opportunity summaries for the tenant (paginated). */
 export async function listPartnerCentralOpportunities(

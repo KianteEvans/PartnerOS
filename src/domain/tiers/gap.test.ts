@@ -73,4 +73,33 @@ describe("tier gap analysis", () => {
     });
     expect(coverage([])).toEqual({ total: 0, met: 0, open: 0, withTask: 0, withEvidence: 0, actioned: 0 });
   });
+
+  it("a boolean requirement is met at 1, with 0/100 progress", () => {
+    expect(gapFor(req({ kind: "boolean", threshold: 1, currentValue: 0 }))).toEqual({ delta: 1, met: false, progress: 0 });
+    expect(gapFor(req({ kind: "boolean", threshold: 1, currentValue: 1 }))).toEqual({ delta: 0, met: true, progress: 100 });
+  });
+
+  it("a secondary constraint must also be met and binds the progress", () => {
+    // primary met, secondary not -> unmet; progress reflects the tighter (secondary).
+    expect(gapFor(req({ threshold: 20, currentValue: 20, secondaryThreshold: 10000, secondaryCurrentValue: 5000 }))).toEqual({
+      delta: 0, met: false, progress: 50,
+    });
+    // both met
+    expect(gapFor(req({ threshold: 20, currentValue: 20, secondaryThreshold: 10000, secondaryCurrentValue: 10000 }))).toEqual({
+      delta: 0, met: true, progress: 100,
+    });
+    // primary not met -> primary delta + tighter progress
+    expect(gapFor(req({ threshold: 20, currentValue: 10, secondaryThreshold: 10000, secondaryCurrentValue: 10000 }))).toEqual({
+      delta: 10, met: false, progress: 50,
+    });
+  });
+
+  it("informational requirements are excluded from the gate, summary, and plan", () => {
+    const fee = req({ key: "fee", informational: true, threshold: 2500, currentValue: 0 });
+    const counted = req({ key: "c", threshold: 10, currentValue: 10 });
+    expect(planSummary([fee, counted])).toEqual({ met: 1, total: 1, percent: 100 });
+    expect(isAchievable([fee, counted])).toBe(true);
+    const plan = advancementPlan([fee, counted]);
+    expect([...plan.phase30, ...plan.phase60, ...plan.phase90]).toEqual([]);
+  });
 });

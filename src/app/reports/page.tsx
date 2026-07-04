@@ -9,6 +9,7 @@ import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table } from "@/components/ui/Table";
+import { Card } from "@/components/ui/Card";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
@@ -110,7 +111,31 @@ export default async function ReportsPage({
 
   return (
     <PageShell>
-      <PageHeader title="Reporting" />
+      <PageHeader
+        title="Reporting"
+        actions={
+          <span style={{ display: "flex", gap: 14, alignItems: "center" }}>
+            <Link
+              href="/reports/forecasts"
+              style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              Forecasts →
+            </Link>
+            <Link
+              href="/reports/winloss"
+              style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              Win/Loss →
+            </Link>
+            <Link
+              href="/reports/roi"
+              style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)", textDecoration: "none" }}
+            >
+              Program ROI →
+            </Link>
+          </span>
+        }
+      />
 
       {stats.total > 0 && (
         <MetricStrip>
@@ -120,6 +145,42 @@ export default async function ReportsPage({
           <MetricCard label="Drafts" value={String(stats.drafts)} sub="in progress" />
         </MetricStrip>
       )}
+
+      {/* The always-on analytical reports — computed live, no generation step. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+        {[
+          { href: "/reports/roi", title: "ROI loops", desc: "Spend → pipeline → won revenue → tier credit, with where the loop leaks." },
+          { href: "/reports/winloss", title: "Win/loss mining", desc: "What drives your wins and losses — factor lifts, loss reasons, rep win rates." },
+          { href: "/reports/forecasts", title: "Forecasts", desc: "Monte-Carlo projections for revenue, health, win rate, and roadmap completion." },
+        ].map((r) => (
+          <Link key={r.href} href={r.href} style={{ textDecoration: "none", color: "inherit" }}>
+            <Card interactive style={{ display: "grid", gap: 4, height: "100%", alignContent: "start" }}>
+              <strong style={{ fontSize: 14, color: "var(--accent)" }}>{r.title} →</strong>
+              <span style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>{r.desc}</span>
+            </Card>
+          </Link>
+        ))}
+      </div>
+
+      <Panel title="AWS QBR packet" accent="var(--accent-2)">
+        <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
+          One click assembles a partner&harr;AWS Quarterly Business Review: a partnership-health
+          arc vs. last quarter, this quarter&rsquo;s committed-vs-achieved results, and a
+          next-quarter commitment plan grounded in your tier path and highest-leverage moves.
+          Open the report&rsquo;s <strong>Print</strong> view for the executive packet.
+        </p>
+        <MutationForm action={generateReport} submitLabel="Generate AWS QBR">
+          <input type="hidden" name="reportType" value="qbr" />
+          <label style={labelStyle}>
+            <span style={spanStyle}>Title</span>
+            <input name="title" required maxLength={200} defaultValue="AWS Quarterly Business Review" style={controlStyle} />
+          </label>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <label style={labelStyle}><span style={spanStyle}>Period start</span><input name="periodStart" type="date" style={controlStyle} /></label>
+            <label style={labelStyle}><span style={spanStyle}>Period end</span><input name="periodEnd" type="date" style={controlStyle} /></label>
+          </div>
+        </MutationForm>
+      </Panel>
 
       <Panel title="Generate report">
         <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>

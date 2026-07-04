@@ -30,7 +30,12 @@ function clamp(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
 
-const WEIGHTS = {
+/**
+ * Per-driver weights for the composite health score. Exported so the Partnership
+ * Graph can render the causal decomposition (each driver's edge to health is weighted
+ * by its WEIGHT) without duplicating the numbers.
+ */
+export const WEIGHTS = {
   evidence: 0.2,
   mdf: 0.15,
   ace: 0.2,
@@ -38,6 +43,8 @@ const WEIGHTS = {
   tasks: 0.2,
   tier: 0.1,
 } as const;
+
+export type DriverWeightKey = keyof typeof WEIGHTS;
 
 export function healthScore(inputs: CommandInputs, today: string): Health {
   const ev = completeness(inputs.evidence);

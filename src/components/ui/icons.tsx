@@ -34,6 +34,14 @@ export const IconCommand = (p: IconProps): ReactNode => (
   </Svg>
 );
 
+export const IconPortfolio = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M12 3l9 5-9 5-9-5 9-5z" />
+    <path d="M3 12l9 5 9-5" />
+    <path d="M3 16.5l9 5 9-5" />
+  </Svg>
+);
+
 export const IconOnboarding = (p: IconProps): ReactNode => (
   <Svg {...p}>
     <path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5 10.1 7.6 12 3z" />
@@ -55,6 +63,15 @@ export const IconApplications = (p: IconProps): ReactNode => (
     <polyline points="14 2 14 8 20 8" />
     <line x1="8" y1="13" x2="16" y2="13" />
     <line x1="8" y1="17" x2="13" y2="17" />
+  </Svg>
+);
+
+export const IconMarketplace = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M4 9h16v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+    <path d="M4 9l1.2-4.2A1 1 0 0 1 6.16 4h11.68a1 1 0 0 1 .96.8L20 9" />
+    <path d="M4 9h16" />
+    <path d="M9.5 20v-5h5v5" />
   </Svg>
 );
 
@@ -102,6 +119,20 @@ export const IconMdf = (p: IconProps): ReactNode => (
   <Svg {...p}>
     <line x1="12" y1="1" x2="12" y2="23" />
     <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+  </Svg>
+);
+
+export const IconFunding = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2.5" />
+    <path d="M6 12h.01M18 12h.01" />
+  </Svg>
+);
+
+export const IconPlaybook = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M13 2 L5 13 h6 l-1 9 l9 -12 h-6 z" />
   </Svg>
 );
 

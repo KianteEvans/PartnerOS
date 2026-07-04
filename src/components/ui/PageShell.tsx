@@ -18,9 +18,12 @@ export function PageShell({
   return (
     <main
       style={{
+        // Container-relative cap (the column lives next to the fixed sidebar, so a
+        // vw-based width would ignore the rail and overflow); horizontal padding is
+        // fluid so narrow viewports don't waste edge space. box-sizing is border-box.
         maxWidth: width,
         margin: "0 auto",
-        padding: "var(--space-8) var(--space-6)",
+        padding: "var(--space-8) clamp(16px, 4vw, var(--space-6))",
         display: "grid",
         gap: "var(--space-5)",
         alignContent: "start",

@@ -7,8 +7,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
 import { FormDrawer } from "@/components/ui/FormDrawer";
+import { and, desc, eq } from "drizzle-orm";
+import { withTenant } from "@/db/client";
+import { marketplaceListings, programs } from "@/db/schema";
 import { updateSolution } from "@/domain/solutions/actions";
 import { loadSolutionDetail } from "@/domain/solutions/load";
+import {
+  LISTING_STATUS_LABELS,
+  listingStatusTone,
+  type MarketplaceListingStatusId,
+} from "@/domain/marketplace/catalog";
 import {
   RENEWAL_BAND_LABELS,
   LAUNCHED_OPP_TARGET,
@@ -26,6 +34,7 @@ import {
   availabilityLabel,
   ftrStatusLabel,
 } from "@/domain/solutions/labels";
+import { money } from "@/domain/format";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -39,7 +48,6 @@ const controlStyle = {
 } as const;
 const textareaStyle = { ...controlStyle, width: "100%", fontFamily: "inherit", resize: "vertical" } as const;
 
-const money = (n: number): string => `$${n.toLocaleString()}`;
 
 function bandTone(b: RenewalBand): Tone {
   return b === "compliant" ? "ok" : b === "at_risk" ? "warn" : "danger";
@@ -69,6 +77,20 @@ export default async function SolutionDetailPage({
   const s = await loadSolutionDetail(identity, id, today);
   if (!s) notFound();
   const due = dueLabel(s.renewal.dueInDays);
+
+  const { marketplaceListingRows, programOptions } = await withTenant(identity, async (tx) => {
+    const marketplaceListingRows = await tx
+      .select({ id: marketplaceListings.id, title: marketplaceListings.title, status: marketplaceListings.status })
+      .from(marketplaceListings)
+      .where(and(eq(marketplaceListings.solutionId, s.id), eq(marketplaceListings.tenantId, identity.tenantId)))
+      .orderBy(desc(marketplaceListings.createdAt));
+    const programOptions = await tx
+      .select({ id: programs.id, name: programs.name })
+      .from(programs)
+      .where(eq(programs.tenantId, identity.tenantId))
+      .orderBy(desc(programs.createdAt));
+    return { marketplaceListingRows, programOptions };
+  });
 
   const editDrawer = (
     <FormDrawer
@@ -103,6 +125,17 @@ export default async function SolutionDetailPage({
             <option key={p} value={p} />
           ))}
         </datalist>
+      </label>
+      <label style={labelStyle}>
+        <span style={spanStyle}>Owning competency</span>
+        <select name="programId" defaultValue={s.programId ?? ""} style={controlStyle}>
+          <option value="">None</option>
+          {programOptions.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </label>
       <label style={labelStyle}>
         <span style={spanStyle}>Availability (Active = Available)</span>
@@ -201,6 +234,16 @@ export default async function SolutionDetailPage({
         <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px", margin: 0, fontSize: 13 }}>
           <dt style={spanStyle}>FTR status</dt>
           <dd style={{ margin: 0 }}>{ftrStatusLabel(s.ftrStatus)}</dd>
+          {s.programId && s.programName && (
+            <>
+              <dt style={spanStyle}>Program</dt>
+              <dd style={{ margin: 0 }}>
+                <Link href={`/programs/${s.programId}`} style={{ color: "var(--accent)", textDecoration: "none" }}>
+                  {s.programName}
+                </Link>
+              </dd>
+            </>
+          )}
           {s.sellingProposition && (
             <>
               <dt style={spanStyle}>Selling proposition</dt>
@@ -240,6 +283,28 @@ export default async function SolutionDetailPage({
           </p>
         )}
       </Panel>
+
+      {marketplaceListingRows.length > 0 && (
+        <Panel
+          title={`AWS Marketplace ${marketplaceListingRows.length === 1 ? "listing" : "listings"} (${marketplaceListingRows.length})`}
+        >
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+            {marketplaceListingRows.map((l) => (
+              <li
+                key={l.id}
+                style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+              >
+                <Link href={`/marketplace/${l.id}`} style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>
+                  {l.title}
+                </Link>
+                <Badge tone={listingStatusTone(l.status as MarketplaceListingStatusId)}>
+                  {LISTING_STATUS_LABELS[l.status as MarketplaceListingStatusId]}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
 
       <Panel title={`Linked ACE opportunities (${s.opportunities.length})`}>
         {s.opportunities.length === 0 ? (

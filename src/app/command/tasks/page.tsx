@@ -14,6 +14,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
 import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
@@ -174,7 +175,7 @@ export default async function TasksPage({
       />
       <CommandNav />
 
-      <MetricStrip min={140}>
+      <MetricStrip min={160}>
         <MetricCard label="Open" value={String(counts.all)} />
         <MetricCard
           label="Overdue"
@@ -216,9 +217,14 @@ export default async function TasksPage({
       <SavedViewsBar listKey="tasks" current={{ view, q: params.q }} />
 
       {pageTasks.length === 0 ? (
-        <p style={{ color: "var(--muted)" }}>
-          {params.q ? `No tasks match “${params.q}” in this view.` : "No tasks in this view."}
-        </p>
+        <EmptyState
+          title={params.q ? "No tasks match" : "No tasks in this view"}
+          hint={
+            params.q
+              ? `Nothing matches “${params.q}”.`
+              : "Create a task, or approve recommendations from an assessment to seed work here."
+          }
+        />
       ) : (
         <BulkProvider allIds={pageTasks.map((t) => t.id)}>
           <div style={{ display: "grid", gap: 12 }}>

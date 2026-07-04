@@ -9,6 +9,9 @@ import {
   tierRequirements,
   tasks,
   assessments,
+  marketplaceListings,
+  marketplaceEntitlements,
+  marketplaceAttributions,
 } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
@@ -16,6 +19,7 @@ import {
   buildSnapshot,
   narrativeSummary,
   reportPreflight,
+  snapshotDelta,
   type ReportType,
   type ReportSnapshot,
   type SnapshotInputs,
@@ -48,6 +52,9 @@ async function gatherInputs(ctx: MutationContext): Promise<SnapshotInputs> {
           category: tierRequirements.category,
           threshold: tierRequirements.threshold,
           currentValue: tierRequirements.currentValue,
+          secondaryThreshold: tierRequirements.secondaryThreshold,
+          secondaryCurrentValue: tierRequirements.secondaryCurrentValue,
+          informational: tierRequirements.informational,
         })
         .from(tierRequirements)
         .where(eq(tierRequirements.tenantId, t))
@@ -58,6 +65,22 @@ async function gatherInputs(ctx: MutationContext): Promise<SnapshotInputs> {
     .from(assessments)
     .where(eq(assessments.tenantId, t));
 
+  const [mpCounts] = await tx
+    .select({
+      listings: sql<number>`count(*)::int`,
+      published: sql<number>`count(*) filter (where ${marketplaceListings.status} = 'published')::int`,
+    })
+    .from(marketplaceListings)
+    .where(eq(marketplaceListings.tenantId, t));
+  const [mpEnt] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(marketplaceEntitlements)
+    .where(eq(marketplaceEntitlements.tenantId, t));
+  const [mpAttr] = await tx
+    .select({ cents: sql<number>`coalesce(sum(${marketplaceAttributions.amount}), 0)::int` })
+    .from(marketplaceAttributions)
+    .where(eq(marketplaceAttributions.tenantId, t));
+
   return {
     mdf,
     opportunities: opps,
@@ -67,6 +90,12 @@ async function gatherInputs(ctx: MutationContext): Promise<SnapshotInputs> {
     tierRequirements: tierReqs,
     tasks: taskRows,
     assessments: assessRows,
+    marketplace: {
+      listings: mpCounts?.listings ?? 0,
+      published: mpCounts?.published ?? 0,
+      activeEntitlements: mpEnt?.n ?? 0,
+      attributedRevenueCents: mpAttr?.cents ?? 0,
+    },
   };
 }
 
@@ -106,21 +135,51 @@ export async function generateReportOp(
 export async function regenerateReportOp(
   ctx: MutationContext,
   input: { readonly id: string; readonly today: string },
-): Promise<{ id: string }> {
+): Promise<{ id: string; changed: string[] }> {
   const { identity, tx } = ctx;
   const [report] = await tx
-    .select({ status: reports.status, reportType: reports.reportType })
+    .select({ status: reports.status, reportType: reports.reportType, snapshot: reports.snapshot })
     .from(reports)
     .where(and(eq(reports.id, input.id), eq(reports.tenantId, identity.tenantId)));
   if (!report) throw new ValidationError("Report not found");
   if (report.status !== "draft") throw new ValidationError("Only a draft report can be regenerated");
 
+  const prior = report.snapshot as ReportSnapshot | null;
   const snapshot = buildSnapshot(await gatherInputs(ctx), input.today);
   const summary = narrativeSummary(snapshot, report.reportType as ReportType);
+  // The saved executive narrative is cleared too — it told the OLD snapshot's story.
   await tx
     .update(reports)
-    .set({ snapshot, summary, updatedAt: sql`now()` })
+    .set({ snapshot, summary, narrative: "", updatedAt: sql`now()` })
     .where(and(eq(reports.id, input.id), eq(reports.tenantId, identity.tenantId)));
+  // Which KPIs actually moved vs the previous snapshot — surfaced in the success toast.
+  const changed = snapshotDelta(snapshot, prior)
+    .filter((d) => d.delta !== null && d.delta !== 0)
+    .map((d) => d.label);
+  return { id: input.id, changed };
+}
+
+/**
+ * Save the executive narrative on a DRAFT report (draft -> draft, like regenerate).
+ * The lifecycle freezes it: once submitted for review it can no longer be rewritten,
+ * and regenerating the snapshot clears it.
+ */
+export async function saveNarrativeOp(
+  ctx: MutationContext,
+  input: { readonly id: string; readonly narrative: string },
+): Promise<{ id: string }> {
+  const updated = await ctx.tx
+    .update(reports)
+    .set({ narrative: input.narrative, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(reports.id, input.id),
+        eq(reports.tenantId, ctx.identity.tenantId),
+        eq(reports.status, "draft"),
+      ),
+    )
+    .returning({ id: reports.id });
+  if (updated.length === 0) throw new ValidationError("Report is not in the 'draft' state");
   return { id: input.id };
 }
 

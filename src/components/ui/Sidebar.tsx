@@ -8,10 +8,14 @@ import { TOGGLE_NAV_EVENT } from "@/components/ui/TopBar";
 import {
   IconHome,
   IconCommand,
+  IconPortfolio,
   IconRoadmaps,
   IconPrograms,
   IconAce,
   IconMdf,
+  IconFunding,
+  IconPlaybook,
+  IconMarketplace,
   IconReports,
   IconSettings,
   IconChevron,
@@ -38,6 +42,7 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
     items: [
       { href: "/", label: "Home", Icon: IconHome },
       { href: "/command", label: "Command Center", Icon: IconCommand },
+      { href: "/playbooks", label: "Playbooks", Icon: IconPlaybook },
     ],
   },
   {
@@ -57,6 +62,8 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
     items: [
       { href: "/ace", label: "ACE Pipeline", Icon: IconAce },
       { href: "/mdf", label: "MDF", Icon: IconMdf },
+      { href: "/funding", label: "AWS Funding", Icon: IconFunding },
+      { href: "/marketplace", label: "Marketplace", Icon: IconMarketplace },
     ],
   },
   {
@@ -76,7 +83,17 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
 const STORAGE_KEY = "partneros:sidebar";
 const MOBILE_BREAKPOINT = 760;
 
-export function Sidebar({ email }: { email: string }): ReactNode {
+/** Agencies get an extra "Portfolio" item in the Overview group (Bet C). */
+function navGroups(isAgency: boolean): ReadonlyArray<{ label: string; items: readonly NavItem[] }> {
+  if (!isAgency) return NAV_GROUPS;
+  return NAV_GROUPS.map((g) =>
+    g.label === "Overview"
+      ? { ...g, items: [...g.items, { href: "/portfolio", label: "Portfolio", Icon: IconPortfolio }] }
+      : g,
+  );
+}
+
+export function Sidebar({ email, isAgency = false }: { email: string; isAgency?: boolean }): ReactNode {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -201,7 +218,7 @@ export function Sidebar({ email }: { email: string }): ReactNode {
             alignContent: "start",
           }}
         >
-          {NAV_GROUPS.map((group, gi) => (
+          {navGroups(isAgency).map((group, gi) => (
             <div key={group.label} style={{ display: "grid", gap: 2 }}>
               {railCollapsed ? (
                 gi > 0 ? (
@@ -229,6 +246,7 @@ export function Sidebar({ email }: { email: string }): ReactNode {
                     key={href}
                     href={href}
                     title={railCollapsed ? label : undefined}
+                    aria-current={active ? "page" : undefined}
                     className={active ? "sidebar-link active" : "sidebar-link"}
                     onClick={() => setMobileOpen(false)}
                     style={{

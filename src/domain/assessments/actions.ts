@@ -18,7 +18,9 @@ import {
   submitAssessmentOp,
   reviewRecommendationOp,
   approveAllRecommendationsOp,
+  bulkDeleteAssessmentsOp,
 } from "@/domain/assessments/operations";
+import { parseBulkIds } from "@/domain/bulk";
 
 /**
  * Assessment server actions: validation, the idempotency-key strategy, and the
@@ -203,5 +205,27 @@ export async function approveAllRecommendations(
     return failure(err);
   }
   revalidatePath(`/plan/${assessmentId}`);
+  return { ok: true };
+}
+
+export async function bulkDeleteAssessments(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    await runMutation({
+      permission: "assessment:delete",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ ids }),
+      action: "assessment.bulk_delete",
+      resourceType: "assessment",
+      auditMetadata: { count: ids.length },
+      handler: (ctx) => bulkDeleteAssessmentsOp(ctx, { ids }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/plan");
   return { ok: true };
 }

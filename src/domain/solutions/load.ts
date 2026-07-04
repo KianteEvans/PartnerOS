@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { withTenant } from "@/db/client";
 import type { DbIdentity } from "@/db/client";
-import { solutions, opportunities, tenants } from "@/db/schema";
+import { programs, solutions, opportunities, tenants } from "@/db/schema";
 import { addMonths } from "@/domain/dates";
 import { renewalReadiness, type RenewalBand, type RenewalStatus } from "@/domain/solutions/renewal";
 import type { TierId } from "@/domain/tiers/catalog";
@@ -19,6 +19,8 @@ export interface SolutionListItem {
   readonly launchedCount: number;
   readonly band: RenewalBand;
   readonly renewalDate: string | null;
+  readonly programId: string | null;
+  readonly programName: string | null;
 }
 
 export async function loadSolutions(identity: DbIdentity, today: string): Promise<SolutionListItem[]> {
@@ -37,6 +39,8 @@ export async function loadSolutions(identity: DbIdentity, today: string): Promis
         availability: solutions.availability,
         ftrStatus: solutions.ftrStatus,
         renewalDate: solutions.renewalDate,
+        programId: solutions.programId,
+        programName: programs.name,
         launchedCount: sql<number>`count(${opportunities.id})`,
       })
       .from(solutions)
@@ -48,8 +52,11 @@ export async function loadSolutions(identity: DbIdentity, today: string): Promis
           gte(opportunities.closeDate, horizon),
         ),
       )
+      .leftJoin(programs, eq(programs.id, solutions.programId))
       .where(eq(solutions.tenantId, t))
-      .groupBy(solutions.id)
+      // programs.name must ride the GROUP BY (the launched count aggregates over
+      // the opportunities join only; one program row per solution).
+      .groupBy(solutions.id, programs.name)
       .orderBy(desc(solutions.createdAt));
 
     return rows.map((r) => {
@@ -75,6 +82,8 @@ export async function loadSolutions(identity: DbIdentity, today: string): Promis
         launchedCount,
         band: renewal.band,
         renewalDate: r.renewalDate,
+        programId: r.programId,
+        programName: r.programName,
       };
     });
   });
@@ -102,6 +111,8 @@ export interface SolutionDetail {
   readonly url: string;
   readonly marketplaceUrl: string;
   readonly renewalDate: string | null;
+  readonly programId: string | null;
+  readonly programName: string | null;
   readonly opportunities: readonly SolutionOpp[];
   readonly launchedCount: number;
   readonly renewal: RenewalStatus;
@@ -116,6 +127,12 @@ export async function loadSolutionDetail(
     const t = identity.tenantId;
     const [s] = await tx.select().from(solutions).where(and(eq(solutions.id, id), eq(solutions.tenantId, t)));
     if (!s) return null;
+    const [linkedProgram] = s.programId
+      ? await tx
+          .select({ name: programs.name })
+          .from(programs)
+          .where(and(eq(programs.id, s.programId), eq(programs.tenantId, t)))
+      : [];
 
     const opps = await tx
       .select({
@@ -164,6 +181,8 @@ export async function loadSolutionDetail(
       url: s.url,
       marketplaceUrl: s.marketplaceUrl,
       renewalDate: s.renewalDate,
+      programId: s.programId,
+      programName: linkedProgram?.name ?? null,
       opportunities: oppsOut,
       launchedCount,
       renewal,

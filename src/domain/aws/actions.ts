@@ -8,8 +8,9 @@ import { awsConnection } from "@/db/schema";
 import { getServerIdentity } from "@/auth/session";
 import { AppError } from "@/http/errors";
 import { type ActionState } from "@/domain/forms";
-import { saveAwsConnectionOp, syncMirrorOp } from "@/domain/aws/operations";
+import { saveAwsConnectionOp, syncMirrorOp, acceptPartnerCentralTruthOp } from "@/domain/aws/operations";
 import { syncAwsSalesOrgOp, type SyncedOppTeam } from "@/domain/aws/sales-org";
+import { parseBulkIds } from "@/domain/bulk";
 import { listPartnerCentralOpportunities, getAwsOpportunityTeams } from "@/aws/partner-central";
 import { toMirrorRow, toAwsTeam, engagementScore, nextBestActions, type MirrorRow } from "@/domain/aws/mapping";
 
@@ -155,4 +156,46 @@ export async function syncPartnerCentral(_prev: ActionState, formData: FormData)
 
   revalidatePath("/ace");
   return { ok: true };
+}
+
+/**
+ * "Accept AWS as truth" — overwrite the selected local opportunities with their
+ * read-only Partner Central mirror values (stage/status/amount/name). Gated on
+ * `ace:update`; the op is tenant-scoped and only touches opps with a matching mirror
+ * row, so manual/partner-originated deals are never affected. Shared by the single-row
+ * and bulk ("Accept all AWS changes") reconcile controls.
+ */
+async function runAcceptTruth(ids: string[], idempotencyKey: string): Promise<{ count: number }> {
+  const res = await runMutation({
+    permission: "ace:update",
+    idempotencyKey,
+    rawBody: JSON.stringify({ count: ids.length }),
+    action: "ace.accept_partner_central_truth",
+    resourceType: "opportunity",
+    auditMetadata: { count: ids.length },
+    handler: (ctx) => acceptPartnerCentralTruthOp(ctx, { ids }),
+  });
+  return res.body;
+}
+
+export async function acceptPartnerCentralTruth(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const id = String(formData.get("id") ?? "");
+    const { count } = await runAcceptTruth(id ? [id] : [], String(formData.get("idempotencyKey") ?? ""));
+    revalidatePath("/ace");
+    return { ok: true, detail: count > 0 ? "Accepted the AWS values for this opportunity." : "No change — already matches AWS." };
+  } catch (err) {
+    return failure(err);
+  }
+}
+
+export async function bulkAcceptPartnerCentralTruth(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const { count } = await runAcceptTruth(ids, String(formData.get("idempotencyKey") ?? ""));
+    revalidatePath("/ace");
+    return { ok: true, detail: `Accepted AWS values for ${count} opportunit${count === 1 ? "y" : "ies"}.` };
+  } catch (err) {
+    return failure(err);
+  }
 }

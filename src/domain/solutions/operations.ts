@@ -1,7 +1,20 @@
 import { and, eq, sql } from "drizzle-orm";
-import { solutions } from "@/db/schema";
+import { programs, solutions } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError } from "@/http/errors";
+
+/** A linked program must belong to this tenant — the FK alone can't stop a
+ *  forged cross-tenant id, so verify before writing. */
+async function assertProgramOwned(
+  { identity, tx }: MutationContext,
+  programId: string,
+): Promise<void> {
+  const [p] = await tx
+    .select({ id: programs.id })
+    .from(programs)
+    .where(and(eq(programs.id, programId), eq(programs.tenantId, identity.tenantId)));
+  if (!p) throw new ValidationError("Program not found");
+}
 
 /** DB side of Solution mutations. Solutions are tenant-wide + reusable across
  *  applications; they link to ACE opportunities (the renewal metric). */
@@ -21,12 +34,15 @@ export interface CreateSolutionInput {
   readonly title: string;
   readonly solutionType: SolutionType;
   readonly programType: string;
+  readonly programId?: string | null;
 }
 
 export async function createSolutionOp(
-  { identity, tx }: MutationContext,
+  ctx: MutationContext,
   input: CreateSolutionInput,
 ): Promise<{ id: string }> {
+  const { identity, tx } = ctx;
+  if (input.programId) await assertProgramOwned(ctx, input.programId);
   const [s] = await tx
     .insert(solutions)
     .values({
@@ -34,6 +50,7 @@ export async function createSolutionOp(
       title: input.title,
       solutionType: input.solutionType,
       programType: input.programType,
+      programId: input.programId ?? null,
       createdBy: identity.userId,
     })
     .returning({ id: solutions.id });
@@ -52,12 +69,15 @@ export interface UpdateSolutionInput {
   readonly url?: string;
   readonly marketplaceUrl?: string;
   readonly renewalDate?: string | null;
+  readonly programId?: string | null;
 }
 
 export async function updateSolutionOp(
-  { identity, tx }: MutationContext,
+  ctx: MutationContext,
   input: UpdateSolutionInput,
 ): Promise<{ id: string }> {
+  const { identity, tx } = ctx;
+  if (input.programId) await assertProgramOwned(ctx, input.programId);
   const set: Record<string, unknown> = { updatedAt: sql`now()` };
   if (input.title !== undefined) set.title = input.title;
   if (input.solutionType !== undefined) set.solutionType = input.solutionType;
@@ -69,6 +89,7 @@ export async function updateSolutionOp(
   if (input.url !== undefined) set.url = input.url;
   if (input.marketplaceUrl !== undefined) set.marketplaceUrl = input.marketplaceUrl;
   if (input.renewalDate !== undefined) set.renewalDate = input.renewalDate;
+  if (input.programId !== undefined) set.programId = input.programId;
 
   const [s] = await tx
     .update(solutions)

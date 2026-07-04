@@ -13,6 +13,7 @@ import {
   type ScenarioId,
 } from "@/domain/roadmaps/planner";
 import type { TierId } from "@/domain/tiers/catalog";
+import type { RoadmapRecommendation } from "@/domain/roadmaps/recommend-filter";
 
 /**
  * The interactive Roadmap Builder. Customers pick the AWS programs and the
@@ -115,12 +116,14 @@ export function RoadmapComposer({
   currentTierLabel,
   members,
   today,
+  recommendations = [],
 }: {
   programs: readonly ComposerProgram[];
   tiers: readonly ComposerTier[];
   currentTierLabel: string;
   members: readonly ComposerMember[];
   today: string;
+  recommendations?: readonly RoadmapRecommendation[];
 }): ReactNode {
   const [objective, setObjective] = useState("");
   const [horizon, setHorizon] = useState<HorizonId>("m6");
@@ -201,6 +204,30 @@ export function RoadmapComposer({
       >
         {/* LEFT: selection */}
         <div style={{ display: "grid", gap: 16 }}>
+          {recommendations.length > 0 && (
+            <section style={{ display: "grid", gap: 8 }}>
+              <h3 style={{ ...heading, color: "var(--section-accent)" }}>Recommended for you</h3>
+              <p style={hint}>Best-fit AWS programs from your evidence, business model, and assessments.</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {recommendations.slice(0, 6).map((r) => {
+                  const on = selected.includes(r.key);
+                  return (
+                    <button
+                      type="button"
+                      key={r.key}
+                      onClick={() => toggleProgram(r.key)}
+                      aria-pressed={on}
+                      title={r.topRationale.map((c) => c.detail).join(" · ")}
+                      style={pill(on)}
+                    >
+                      {r.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <section style={{ display: "grid", gap: 8 }}>
             <h3 style={heading}>Programs &amp; competencies</h3>
             <p style={hint}>Pick the AWS programs you want to earn.</p>

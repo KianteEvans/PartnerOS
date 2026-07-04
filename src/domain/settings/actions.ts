@@ -27,6 +27,9 @@ import {
   setConnectorStatusOp,
   syncConnectorOp,
 } from "@/domain/settings/operations";
+import { inviteEmail } from "@/domain/settings/invite-email";
+import { sendEmail } from "@/notifications/delivery";
+import { env } from "@/env";
 
 /**
  * Settings server actions: validation, idempotency, and Next plumbing only.
@@ -138,11 +141,29 @@ export async function inviteUser(
       auditMetadata: { email: payload.email, role: payload.role },
       handler: (ctx) => inviteUserOp(ctx, payload),
     });
+    // The invite row is committed; email delivery is best-effort on top (the
+    // adapter never throws). Invites are consumed by email match at first
+    // sign-in, so a failed send only means telling the invitee out-of-band.
+    const delivery = await sendEmail(
+      inviteEmail({
+        email: payload.email,
+        role: payload.role,
+        origin: new URL(env.OIDC_REDIRECT_URI).origin,
+      }),
+    );
+    revalidatePath("/settings");
+    return {
+      ok: true,
+      detail:
+        delivery === "sent"
+          ? `Invitation emailed to ${payload.email}.`
+          : delivery === "skipped"
+            ? `Invitation recorded for ${payload.email} - email delivery is not configured, so let them know to sign in with that address.`
+            : `Invitation recorded for ${payload.email}, but the email could not be sent - let them know to sign in with that address.`,
+    };
   } catch (err) {
     return failure(err);
   }
-  revalidatePath("/settings");
-  return { ok: true };
 }
 
 export async function revokeInvitation(

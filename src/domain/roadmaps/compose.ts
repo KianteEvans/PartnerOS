@@ -61,10 +61,17 @@ export function composeMilestones(
   if (target) {
     const tierLabel = `${TIER_LABELS[target]} tier`;
     for (const t of thresholdsForTier(target)) {
+      if (t.informational) continue; // the annual fee is context, not a milestone
+      const detail =
+        t.kind === "boolean"
+          ? "Complete this requirement."
+          : t.secondary
+            ? `Reach ${t.threshold} ${t.unit} (and ${t.secondary.threshold} ${t.secondary.unit} ${t.secondary.label}).`
+            : `Reach ${t.threshold} ${t.unit}.`;
       out.push({
         key: `tier:${target}:${t.key}`,
         title: `${tierLabel}: ${t.label}`,
-        detail: `Reach ${t.threshold} ${t.unit}.`,
+        detail,
         originKind: "tier",
         originLabel: tierLabel,
         originRef: `${target}:${t.key}`,

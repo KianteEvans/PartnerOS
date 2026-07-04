@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
-import { programs, programRequirements, evidence, tasks, users } from "@/db/schema";
+import { programs, programRequirements, evidence, solutions, tasks, users } from "@/db/schema";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -22,12 +22,14 @@ import { loadProgramRoiDetail, type RoiOppRow } from "@/domain/programs/roi-load
 import { loadApplicationsForProgram } from "@/domain/applications/load";
 import { awsStatusLabel } from "@/domain/applications/packet";
 import { AWS_ORG_TITLE_LABELS, type RepRollup } from "@/domain/ace/sales-org";
+import { availabilityLabel } from "@/domain/solutions/labels";
 import { STAGE_LABELS } from "@/domain/ace/opportunities";
 import {
   updateProgram,
   updateRequirement,
   createRequirementTask,
   stageRequirementEvidence,
+  linkRequirementEvidence,
   submitProgram,
 } from "@/domain/programs/actions";
 import {
@@ -37,10 +39,10 @@ import {
   type RequirementState,
   type ProgramStatusValue,
 } from "@/domain/programs/gate";
+import { money } from "@/domain/format";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
-const money = (n: number): string => `$${n.toLocaleString()}`;
 const stageLabel = (s: string): string => (STAGE_LABELS as Record<string, string>)[s] ?? s;
 function awsTone(s: string): "ok" | "danger" | "warn" | "neutral" | "info" {
   if (s === "confirmed") return "ok";
@@ -104,11 +106,21 @@ export default async function ProgramDetailPage({
       .select({ id: users.id, email: users.email })
       .from(users)
       .where(eq(users.tenantId, identity.tenantId));
-    return { program, reqs, members };
+    const evidenceList = await tx
+      .select({ id: evidence.id, title: evidence.title, status: evidence.status })
+      .from(evidence)
+      .where(and(eq(evidence.tenantId, identity.tenantId), ne(evidence.status, "missing")))
+      .orderBy(asc(evidence.title));
+    const linkedSolutions = await tx
+      .select({ id: solutions.id, title: solutions.title, availability: solutions.availability })
+      .from(solutions)
+      .where(and(eq(solutions.programId, id), eq(solutions.tenantId, identity.tenantId)))
+      .orderBy(asc(solutions.title));
+    return { program, reqs, members, evidenceList, linkedSolutions };
   });
 
   if (!data) notFound();
-  const { program, reqs, members } = data;
+  const { program, reqs, members, evidenceList, linkedSolutions } = data;
 
   // Competency ROI: attributed ACE opportunities + the AWS segment/team behind them.
   const roiDetail =
@@ -260,13 +272,28 @@ export default async function ProgramDetailPage({
       <Panel
         title={`Requirements (${reqs.length})`}
         actions={
-          <Link href="/programs/evidence/fit" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
+          <Link href="/programs?view=fit" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
             Coverage analysis →
           </Link>
         }
       >
         <div style={{ display: "grid", gap: 14 }}>
-          {reqs.map((r) => (
+          {/* Grouped by status so long requirement lists stay scannable: what's
+              actionable stays expanded, what's done folds away. */}
+          {([
+            { key: "open", label: "Open", open: true },
+            { key: "blocked", label: "Blocked", open: true },
+            { key: "met", label: "Met", open: false },
+          ] as const).map((group) => {
+            const items = reqs.filter((r) => r.status === group.key);
+            if (items.length === 0) return null;
+            return (
+          <details key={group.key} open={group.open}>
+            <summary style={{ cursor: "pointer", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--muted)", fontWeight: 600, marginBottom: 10 }}>
+              {group.label} ({items.length})
+            </summary>
+            <div style={{ display: "grid", gap: 14 }}>
+          {items.map((r) => (
             <Card key={r.id}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <strong style={{ fontSize: 14 }}>{r.label}</strong>
@@ -333,6 +360,29 @@ export default async function ProgramDetailPage({
                   </label>
                 </FormDrawer>
 
+                {(evidenceList.length > 0 || r.evidenceId) && (
+                  <FormDrawer
+                    triggerLabel={r.evidenceId ? "Change evidence" : "Link evidence"}
+                    triggerVariant="secondary"
+                    title={`Link evidence — ${r.label}`}
+                    action={linkRequirementEvidence}
+                    submitLabel="Save"
+                    successMessage="Evidence link updated."
+                    submitVariant="secondary"
+                    hidden={{ requirementId: r.id, programId: program.id }}
+                  >
+                    <label style={labelStyle}>
+                      <span style={spanStyle}>Evidence</span>
+                      <select name="evidenceId" defaultValue={r.evidenceId ?? ""} style={controlStyle}>
+                        <option value="">— none (unlink) —</option>
+                        {evidenceList.map((e) => (
+                          <option key={e.id} value={e.id}>{e.title} ({e.status})</option>
+                        ))}
+                      </select>
+                    </label>
+                  </FormDrawer>
+                )}
+
                 {!r.taskId && (
                   <MutationForm action={createRequirementTask} submitLabel="Create task" variant="secondary" hidden={{ requirementId: r.id, programId: program.id }} />
                 )}
@@ -348,6 +398,10 @@ export default async function ProgramDetailPage({
               )}
             </Card>
           ))}
+            </div>
+          </details>
+            );
+          })}
         </div>
       </Panel>
 
@@ -393,6 +447,42 @@ export default async function ProgramDetailPage({
           </div>
         )}
       </Panel>
+
+      {linkedSolutions.length > 0 && (
+        <Panel
+          title={`Solutions (${linkedSolutions.length})`}
+          actions={
+            <Link
+              href="/programs?view=solutions"
+              style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}
+            >
+              All Solutions →
+            </Link>
+          }
+        >
+          <p style={{ margin: "0 0 12px", fontSize: 13, color: "var(--muted)" }}>
+            Validated Solutions owned by this competency — their renewal readiness keeps the
+            designation current.
+          </p>
+          <div style={{ display: "grid", gap: 10 }}>
+            {linkedSolutions.map((s) => (
+              <Card key={s.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <Link
+                    href={`/programs/solutions/${s.id}`}
+                    style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14, fontWeight: 600 }}
+                  >
+                    {s.title}
+                  </Link>
+                  <Badge tone={s.availability === "available" ? "ok" : s.availability === "beta" ? "info" : "danger"}>
+                    {availabilityLabel(s.availability)}
+                  </Badge>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </Panel>
+      )}
     </PageShell>
   );
 }

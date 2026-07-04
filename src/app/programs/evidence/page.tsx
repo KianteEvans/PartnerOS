@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/Card";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
 import { BulkBar } from "@/components/ui/bulk/BulkBar";
 import { BulkCheckbox } from "@/components/ui/bulk/BulkCheckbox";
@@ -229,7 +230,7 @@ export default async function EvidencePage({
       />
       <LifecycleNav />
 
-      <Link href="/programs/evidence/fit" style={{ textDecoration: "none" }}>
+      <Link href="/programs?view=fit" style={{ textDecoration: "none" }}>
         <Card
           interactive
           style={{
@@ -351,9 +352,14 @@ export default async function EvidencePage({
       <SavedViewsBar listKey="evidence" current={{ view, q: params.q }} />
 
       {pageRows.length === 0 ? (
-        <p style={{ color: "var(--muted)" }}>
-          {params.q ? `No evidence matches “${params.q}” in this view.` : "No evidence in this view."}
-        </p>
+        <EmptyState
+          title={params.q ? "No evidence matches" : "No evidence in this view"}
+          hint={
+            params.q
+              ? `Nothing matches “${params.q}”.`
+              : "Upload an artifact with “Add evidence” above to start building your locker."
+          }
+        />
       ) : (
         <BulkProvider allIds={pageRows.map((r) => r.id)}>
           <div style={{ display: "grid", gap: 12 }}>

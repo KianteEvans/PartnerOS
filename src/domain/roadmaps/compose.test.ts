@@ -24,11 +24,12 @@ describe("roadmap composer", () => {
 
   it("fans tier advancement out into one milestone per threshold requirement", () => {
     const out = composeMilestones({ programKeys: [], targetTier: "advanced" });
-    // advanced has 4 thresholds
-    expect(out).toHaveLength(4);
+    // advanced has 6 gating thresholds; the informational annual fee is not a milestone
+    expect(out).toHaveLength(6);
     expect(out.every((m) => m.originKind === "tier")).toBe(true);
     expect(out.every((m) => m.originLabel === "Advanced tier")).toBe(true);
     expect(out.every((m) => m.originRef.startsWith("advanced:"))).toBe(true);
+    expect(out.some((m) => m.originRef === "advanced:annual_apn_fee")).toBe(false);
     expect(out[0]!.title.startsWith("Advanced tier: ")).toBe(true);
   });
 

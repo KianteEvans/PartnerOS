@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
-import { opportunities, aceRelationships, aceInteractions, users, partnerCentralOpportunities, awsConnection, solutions, opportunityAwsTeam, programs, aceGoals } from "@/db/schema";
+import { opportunities, aceRelationships, aceInteractions, users, partnerCentralOpportunities, awsConnection, solutions, opportunityAwsTeam, programs, aceGoals, opportunityCaseStudies } from "@/db/schema";
 import { addDays } from "@/domain/dates";
 import { can } from "@/authz/permissions";
 import { Panel } from "@/components/ui/Panel";
@@ -22,16 +22,27 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
 import { Pagination } from "@/components/ui/Pagination";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
+import { BulkBar } from "@/components/ui/bulk/BulkBar";
+import { BulkActionForm } from "@/components/ui/bulk/BulkActionForm";
+import { BulkCheckbox } from "@/components/ui/bulk/BulkCheckbox";
 import { parseListParams, listHref, pageCount, type ListParams } from "@/domain/list";
+import { tableView } from "@/domain/list-view";
 import {
   createOpportunity,
   updateOpportunity,
+  bulkUpdateOpportunity,
   approveRouting,
   createRelationship,
   updateRelationship,
   logInteraction,
 } from "@/domain/ace/actions";
-import { syncPartnerCentral } from "@/domain/aws/actions";
+import { syncPartnerCentral, acceptPartnerCentralTruth, bulkAcceptPartnerCentralTruth } from "@/domain/aws/actions";
+import { SyncStatusStrip } from "@/components/ui/SyncStatusStrip";
+import { Callout } from "@/components/ui/Callout";
+import { connectorHealth, type ConnectorStatus } from "@/domain/settings/connectors";
+import { reconcileOpportunities, reconcileSummary, type ReconcileRow } from "@/domain/aws/reconcile";
 import {
   filterOpportunities,
   viewCounts,
@@ -51,6 +62,8 @@ import {
   type OppLike,
   type FunnelStage,
 } from "@/domain/ace/opportunities";
+import { LOSS_REASONS, LOSS_REASON_LABELS, type LossReason } from "@/domain/ace/winloss";
+import { loadWinLoss, type WinLossView } from "@/domain/ace/winloss-load";
 import { coverageByAccount, ROLE_LABELS } from "@/domain/ace/relationships";
 import {
   computeRepHealth,
@@ -78,18 +91,9 @@ import {
 import { measureGoal, type GoalOpp } from "@/domain/ace-goals/catalog";
 import { syncGoalSnapshots } from "@/domain/ace-goals/load";
 import { CoSellingGoals } from "@/app/ace/CoSellingGoals";
+import { money } from "@/domain/format";
+import { formLabel as labelStyle, formLabelSpan as spanStyle, formControlSm as controlStyle } from "@/components/ui/form-styles";
 
-const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
-const spanStyle = { color: "var(--muted)" } as const;
-const controlStyle = {
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  padding: "6px 8px",
-  color: "var(--text)",
-  fontSize: 13,
-} as const;
-const money = (n: number): string => `$${n.toLocaleString()}`;
 const ctaLink = { color: "var(--accent)", textDecoration: "none", fontSize: 13, fontWeight: 600 } as const;
 const CADENCE_WINDOW_DAYS = 90;
 const KIND_LABELS = { meeting: "Meeting", email: "Email", call: "Call", qbr: "QBR", note: "Note" } as const;
@@ -102,16 +106,35 @@ const HEALTH_TONE: Record<HealthBand, "ok" | "info" | "warn" | "danger"> = {
   dormant: "danger",
 };
 
-type Tab = "opportunities" | "relationships" | "reps";
+type Tab = "opportunities" | "relationships" | "reps" | "reconcile" | "insights";
 const TABS: { key: Tab; label: string }[] = [
   { key: "opportunities", label: "Pipeline" },
   { key: "relationships", label: "Relationships" },
   { key: "reps", label: "Sales Org" },
+  { key: "reconcile", label: "Reconcile" },
+  { key: "insights", label: "Insights" },
 ];
 
 function isOppView(v: string | undefined): v is OppView {
   return v !== undefined && (OPP_VIEWS as readonly string[]).includes(v);
 }
+
+// Sort options for the Pipeline (opportunities) list, with the default direction
+// each key reads best in (newest/highest-priority/biggest-value first; A→Z for text).
+const OPP_SORTS = [
+  { value: "created", label: "Newest" },
+  { value: "priority", label: "Priority" },
+  { value: "value", label: "Value" },
+  { value: "name", label: "Name" },
+  { value: "stage", label: "Stage" },
+] as const;
+const OPP_SORT_DIR: Record<string, "asc" | "desc"> = {
+  created: "desc",
+  priority: "desc",
+  value: "desc",
+  name: "asc",
+  stage: "asc",
+};
 
 export default async function AcePage({
   searchParams,
@@ -121,16 +144,27 @@ export default async function AcePage({
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
   const canApprove = can(identity.role, "ace:approve");
+  const canUpdate = can(identity.role, "ace:update");
 
   const sp = await searchParams;
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const viewParam = Array.isArray(sp.view) ? sp.view[0] : sp.view;
-  const tab: Tab = tabParam === "relationships" || tabParam === "reps" ? tabParam : "opportunities";
+  const tab: Tab =
+    tabParam === "relationships" || tabParam === "reps" || tabParam === "reconcile" || tabParam === "insights"
+      ? tabParam
+      : "opportunities";
   const view: OppView = isOppView(viewParam) ? viewParam : "all";
-  const list = parseListParams(sp, { sortable: [], defaultSort: "created" });
+  const list = parseListParams(sp, {
+    sortable: ["created", "name", "stage", "value", "priority"],
+    defaultSort: "created",
+  });
   const today = new Date().toISOString().slice(0, 10);
+  const nowMs = Date.now();
 
-  const { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals } = await withTenant(identity, async (tx) => {
+  // Win/loss mining for the Insights tab only (its own tenant tx — the deal-desk idiom).
+  const winloss: WinLossView | null = tab === "insights" ? await loadWinLoss(identity) : null;
+
+  const { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals, proofRows } = await withTenant(identity, async (tx) => {
     const opps = await tx.select().from(opportunities).where(eq(opportunities.tenantId, identity.tenantId)).orderBy(desc(opportunities.createdAt));
     const rels = await tx.select().from(aceRelationships).where(eq(aceRelationships.tenantId, identity.tenantId)).orderBy(desc(aceRelationships.createdAt));
     const members = await tx.select({ id: users.id, email: users.email }).from(users).where(eq(users.tenantId, identity.tenantId));
@@ -146,6 +180,13 @@ export default async function AcePage({
       .from(solutions)
       .where(eq(solutions.tenantId, identity.tenantId))
       .orderBy(desc(solutions.createdAt));
+    // Pinned proof points per deal (one grouped count; the scored matches
+    // themselves are computed on the Deal Desk, not per list row).
+    const proofRows = await tx
+      .select({ opportunityId: opportunityCaseStudies.opportunityId, n: count() })
+      .from(opportunityCaseStudies)
+      .where(eq(opportunityCaseStudies.tenantId, identity.tenantId))
+      .groupBy(opportunityCaseStudies.opportunityId);
     // Competency programs a deal can be credited to for ROI (any status — influence
     // is only counted post-achievement by the ROI engine).
     const progs = await tx
@@ -166,11 +207,19 @@ export default async function AcePage({
       .from(aceGoals)
       .where(eq(aceGoals.tenantId, identity.tenantId))
       .orderBy(desc(aceGoals.createdAt));
-    return { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals };
+    return { opps, rels, members, synced, awsConn, interactions, sols, team, progs, goals, proofRows };
   });
 
   const emailById = new Map(members.map((m) => [m.id, m.email]));
   const summary = pipelineSummary(opps as OppLike[], today);
+
+  // Reconciliation: local ACE opps vs the read-only Partner Central mirror. A pure diff
+  // over already-loaded rows (no extra query) — powers the Reconcile tab + Pipeline drift hint.
+  const reconRows = reconcileOpportunities(
+    opps.map((o) => ({ id: o.id, externalId: o.externalId, name: o.name, accountName: o.accountName, stage: o.stage, status: o.status, amount: o.amount })),
+    synced.map((m) => ({ externalId: m.externalId, name: m.name, accountName: m.accountName, stage: m.stage, status: m.status, amount: m.amount })),
+  );
+  const reconSummary = reconcileSummary(reconRows);
 
   // Cadence per AWS contact: touchpoints in the trailing window + latest touch.
   // Interactions are ordered newest-first, so the first seen per contact is latest.
@@ -321,7 +370,7 @@ export default async function AcePage({
       />
 
       {/* Persistent command strip — one orientation surface across every tab. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         <MetricCard label="Open pipeline" value={money(summary.openValue)} sub={`${summary.open} open ${summary.open === 1 ? "deal" : "deals"}`} tone="accent" />
         <MetricCard label="Win rate" value={wr === null ? "—" : `${wr}%`} sub={`${summary.won} won · ${money(summary.wonValue)}`} tone="ok" />
         <MetricCard label="Pipeline at risk" value={money(atRiskValue)} sub={`${summary.atRisk} ${summary.atRisk === 1 ? "deal" : "deals"}`} tone={atRiskValue > 0 ? "warn" : "neutral"} />
@@ -352,22 +401,17 @@ export default async function AcePage({
         canManage={canManageGoals}
       />
 
-      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {TABS.map((t) => {
-          const active = t.key === tab;
-          return (
-            <Link key={t.key} href={`/ace?tab=${t.key}`} style={{ padding: "6px 14px", borderRadius: 999, fontSize: 13, textDecoration: "none", border: "1px solid var(--border)", background: active ? "var(--accent)" : "transparent", color: active ? "var(--accent-ink)" : "var(--muted)", fontWeight: active ? 600 : 400 }}>
-              {t.label}
-            </Link>
-          );
-        })}
-      </nav>
+      <SegmentedControl
+        options={TABS.map((t) => ({ value: t.key, label: t.label }))}
+        value={tab}
+        hrefFor={(k) => `/ace?tab=${k}`}
+      />
 
       {tab === "opportunities" && (
         <>
           <PipelineSummaryPanel summary={summary} funnel={funnel} winRate={wr} />
-          <SyncedPartnerCentral synced={synced} connection={awsConn} />
-          <Opportunities opps={opps} rels={rels} view={view} today={today} members={members} emailById={emailById} canApprove={canApprove} list={list} sols={sols} progs={progs} />
+          <SyncedPartnerCentral synced={synced} connection={awsConn} nowMs={nowMs} today={today} drift={reconSummary.drift} />
+          <Opportunities opps={opps} rels={rels} view={view} today={today} members={members} emailById={emailById} canApprove={canApprove} list={list} sols={sols} progs={progs} proofCounts={new Map(proofRows.map((r) => [r.opportunityId, Number(r.n)]))} />
         </>
       )}
       {tab === "relationships" && <Relationships rels={rels} opps={opps} cadence={cadenceByContact} interactions={interactions} today={today} list={list} />}
@@ -378,10 +422,94 @@ export default async function AcePage({
           members={members}
           team={team}
           today={today}
+          connection={awsConn}
+          nowMs={nowMs}
           rsort={Array.isArray(sp.rsort) ? sp.rsort[0] : sp.rsort}
         />
       )}
+      {tab === "reconcile" && (
+        <Reconcile rows={reconRows} connection={awsConn} nowMs={nowMs} today={today} canUpdate={canUpdate} />
+      )}
+      {tab === "insights" && winloss && <WinLossInsights view={winloss} />}
     </PageShell>
+  );
+}
+
+/**
+ * Compact win/loss read-out for the Insights tab: headline stats + the strongest
+ * trusted factor lifts + top loss reasons + the relationships that win. The full
+ * analysis (cohorts, per-deal table, AI narrative) lives at /reports/winloss.
+ */
+function WinLossInsights({ view }: { view: WinLossView }): ReactNode {
+  const { report: r, reps } = view;
+  const o = r.overall;
+  const trusted = r.factors.filter((f) => !f.suppressed && f.lift !== null).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0));
+  const pct = (n: number | null): string => (n == null ? "—" : `${n}%`);
+
+  if (o.closed === 0) {
+    return (
+      <Panel title="Win/loss insights">
+        <EmptyState
+          title="No closed deals yet"
+          hint="Mark opportunities won or lost (with a loss reason) — insights start with the first closed deal."
+        />
+      </Panel>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        <MetricCard label="Closed deals" value={String(o.closed)} sub={`${o.won} won · ${o.lost} lost`} />
+        <MetricCard label="Win rate" value={pct(o.winRate)} sub="of closed" tone={o.winRate != null && o.winRate >= 50 ? "ok" : "warn"} />
+        <MetricCard label="Won revenue" value={money(o.wonTCV)} sub="realized" tone="ok" />
+        <MetricCard label="Avg cycle" value={o.avgCycleDays == null ? "—" : `${o.avgCycleDays}d`} sub="created → won" />
+      </div>
+
+      <Panel
+        title="What's driving outcomes"
+        accent="var(--section-accent)"
+        actions={
+          <Link href="/reports/winloss" style={{ fontSize: 13, fontWeight: 600, color: "var(--section-accent)", textDecoration: "none" }}>
+            Full analysis →
+          </Link>
+        }
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          {trusted.slice(0, 3).map((f) => (
+            <div key={f.key} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13.5 }}>
+              <span style={{ fontWeight: 600 }}>{f.label}</span>
+              <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
+                {pct(f.withWinRate)} with vs {pct(f.withoutWinRate)} without ·{" "}
+                <strong style={{ color: f.lift != null && f.lift > 1 ? "var(--ok)" : "var(--text)" }}>{f.lift}x</strong>
+              </span>
+            </div>
+          ))}
+          {trusted.length === 0 && (
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
+              Factor lifts unlock as more deals close (3+ on each side).
+            </p>
+          )}
+          {r.lossReasons.length > 0 && (
+            <p style={{ margin: "4px 0 0", fontSize: 12.5, color: "var(--muted)" }}>
+              Top loss reason: <strong style={{ color: "var(--danger)" }}>{r.lossReasons[0]!.label}</strong> (
+              {r.lossReasons[0]!.count} deal{r.lossReasons[0]!.count === 1 ? "" : "s"} · {money(r.lossReasons[0]!.lostTCV)})
+            </p>
+          )}
+          {reps.length > 0 && (
+            <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)" }}>
+              Winning relationships:{" "}
+              {reps.slice(0, 3).map((rep, i) => (
+                <span key={rep.id}>
+                  {i > 0 ? " · " : ""}
+                  <strong style={{ color: "var(--text)" }}>{rep.name}</strong> {pct(rep.winRate)} ({rep.closed} closed)
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      </Panel>
+    </>
   );
 }
 
@@ -436,6 +564,7 @@ function PipelineSummaryPanel({
   winRate: number | null;
 }): ReactNode {
   return (
+    // eslint-disable-next-line @next/next/no-html-link-for-pages -- /ace/export is a CSV download route handler (not the [id] page); an <a> is correct for a file download.
     <Panel title="Pipeline" actions={<a href="/ace/export" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>Account plan (CSV)</a>}>
       <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "center" }}>
         <RingGauge value={wr ?? 0} max={100} size={120} color="var(--ok)" label={wr === null ? "—" : `${wr}%`} caption="Win rate" />
@@ -473,12 +602,24 @@ function PipelineSummaryPanel({
 function SyncedPartnerCentral({
   synced,
   connection,
+  nowMs,
+  today,
+  drift,
 }: {
   synced: (typeof partnerCentralOpportunities.$inferSelect)[];
   connection: typeof awsConnection.$inferSelect | undefined;
+  nowMs: number;
+  today: string;
+  drift: number;
 }): ReactNode {
   const configured = Boolean(connection?.enabled);
-  const lastSynced = connection?.lastSyncedAt ? connection.lastSyncedAt.toISOString().slice(0, 10) : null;
+  const health = connectorHealth(
+    {
+      status: (connection?.status ?? "not_configured") as ConnectorStatus,
+      lastSyncDate: connection?.lastSyncedAt ? connection.lastSyncedAt.toISOString().slice(0, 10) : null,
+    },
+    today,
+  );
   return (
     <Panel title="Synced from AWS Partner Central">
       {!configured ? (
@@ -492,12 +633,24 @@ function SyncedPartnerCentral({
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {synced.length} synced · catalog {connection?.catalog ?? "Sandbox"}
-              {lastSynced ? ` · last sync ${lastSynced}` : " · never synced"}
-            </span>
+            <SyncStatusStrip
+              health={health}
+              lastSyncedAtMs={connection?.lastSyncedAt ? connection.lastSyncedAt.getTime() : null}
+              nowMs={nowMs}
+              rowCount={synced.length}
+              rowNoun="AWS opps"
+              label={`catalog ${connection?.catalog ?? "Sandbox"}`}
+            />
             <MutationForm action={syncPartnerCentral} submitLabel="Sync now" variant="secondary" />
           </div>
+          {drift > 0 ? (
+            <p style={{ margin: 0, fontSize: 12, color: "var(--warn)" }}>
+              {drift} {drift === 1 ? "opportunity differs" : "opportunities differ"} from AWS —{" "}
+              <Link href="/ace?tab=reconcile" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600 }}>
+                Reconcile →
+              </Link>
+            </p>
+          ) : null}
           {synced.length === 0 ? (
             <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
               No synced opportunities yet — click <strong>Sync now</strong> to pull from Partner Central.
@@ -524,6 +677,142 @@ function SyncedPartnerCentral({
   );
 }
 
+function DriftField({ field, row }: { field: ReconcileRow["driftFields"][number]; row: ReconcileRow }): ReactNode {
+  const f = row.fields[field];
+  const LABELS: Record<ReconcileRow["driftFields"][number], string> = {
+    stage: "Stage",
+    status: "Status",
+    amount: "Amount",
+    name: "Name",
+  };
+  const render = (v: string | number): ReactNode => {
+    if (field === "amount") return money(Number(v));
+    const s = String(v);
+    if (field === "stage") return STAGE_LABELS[s as keyof typeof STAGE_LABELS] ?? s;
+    if (field === "status") return <Badge tone={statusTone(s)}>{s}</Badge>;
+    return s;
+  };
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, flexWrap: "wrap" }}>
+      <span style={{ color: "var(--muted)", minWidth: 54 }}>{LABELS[field]}</span>
+      <span style={{ textDecoration: "line-through", opacity: 0.6 }}>{render(f.local)}</span>
+      <span aria-hidden style={{ color: "var(--muted)" }}>→</span>
+      <strong>{render(f.mirror)}</strong>
+    </div>
+  );
+}
+
+function Reconcile({
+  rows,
+  connection,
+  nowMs,
+  today,
+  canUpdate,
+}: {
+  rows: ReconcileRow[];
+  connection: typeof awsConnection.$inferSelect | undefined;
+  nowMs: number;
+  today: string;
+  canUpdate: boolean;
+}): ReactNode {
+  if (!connection?.enabled) {
+    return (
+      <Panel title="Reconcile with AWS">
+        <EmptyState
+          title="Connect AWS Partner Central"
+          hint={
+            <>
+              Reconciliation compares your ACE opportunities against the read-only Partner Central
+              mirror. Connect AWS in{" "}
+              <Link href="/settings?section=integrations" style={{ color: "var(--accent)" }}>
+                Settings → Integrations
+              </Link>{" "}
+              and run a sync to begin.
+            </>
+          }
+        />
+      </Panel>
+    );
+  }
+  const summary = reconcileSummary(rows);
+  const drift = rows.filter((r) => r.classification === "drift");
+  const driftIds = JSON.stringify(drift.map((d) => d.localId).filter((x): x is string => x !== null));
+  const health = connectorHealth(
+    {
+      status: connection.status as ConnectorStatus,
+      lastSyncDate: connection.lastSyncedAt ? connection.lastSyncedAt.toISOString().slice(0, 10) : null,
+    },
+    today,
+  );
+  return (
+    <Panel
+      title="Reconcile with AWS"
+      actions={
+        <SyncStatusStrip
+          health={health}
+          lastSyncedAtMs={connection.lastSyncedAt ? connection.lastSyncedAt.getTime() : null}
+          nowMs={nowMs}
+          rowCount={summary.drift}
+          rowNoun="drifted"
+        />
+      }
+    >
+      <div style={{ display: "grid", gap: 14 }}>
+        <Callout tone="info" title="Partner Central is a read-only mirror of AWS">
+          Your ACE opportunities are the editable source of record. <strong>Accept AWS</strong> copies the
+          AWS values (stage, status, amount, name) onto your opportunity. Manual deals never appear here.
+        </Callout>
+
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "var(--muted)" }}>
+          <span><strong style={{ color: "var(--text)" }}>{summary.drift}</strong> drifted</span>
+          <span><strong style={{ color: "var(--text)" }}>{summary.inSync}</strong> in sync</span>
+          <span><strong style={{ color: "var(--text)" }}>{summary.mirrorOnly}</strong> new in AWS</span>
+          <span><strong style={{ color: "var(--text)" }}>{summary.localOnly}</strong> not in AWS</span>
+        </div>
+
+        {drift.length === 0 ? (
+          <EmptyState
+            title="Everything matches Partner Central"
+            hint="No opportunity has drifted from its AWS mirror — you're fully reconciled."
+          />
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {canUpdate && drift.length > 1 ? (
+              <div style={{ justifySelf: "end" }}>
+                <MutationForm
+                  action={bulkAcceptPartnerCentralTruth}
+                  submitLabel={`Accept all AWS changes (${drift.length})`}
+                  hidden={{ ids: driftIds }}
+                />
+              </div>
+            ) : null}
+            {drift.map((r) => (
+              <Card key={r.externalId}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>{r.name}</strong>
+                    <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 2 }}>
+                      {r.accountName || "—"} · {r.driftFields.length} field{r.driftFields.length === 1 ? "" : "s"} differ
+                    </div>
+                  </div>
+                  {canUpdate && r.localId ? (
+                    <MutationForm action={acceptPartnerCentralTruth} submitLabel="Accept AWS" variant="secondary" hidden={{ id: r.localId }} />
+                  ) : null}
+                </div>
+                <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                  {r.driftFields.map((f) => (
+                    <DriftField key={f} field={f} row={r} />
+                  ))}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function Opportunities({
   opps,
   rels,
@@ -535,6 +824,7 @@ function Opportunities({
   list,
   sols,
   progs,
+  proofCounts,
 }: {
   opps: (typeof opportunities.$inferSelect)[];
   rels: (typeof aceRelationships.$inferSelect)[];
@@ -546,31 +836,45 @@ function Opportunities({
   list: ListParams;
   sols: ReadonlyArray<{ id: string; title: string }>;
   progs: ReadonlyArray<{ id: string; name: string }>;
+  proofCounts: Map<string, number>;
 }): ReactNode {
   const relNameById = new Map(rels.map((r) => [r.id, r.name]));
   const counts = viewCounts(opps as OppLike[], { today });
   const filtered = filterOpportunities(opps, view, { today });
-  const searched = list.q
-    ? filtered.filter((o) => o.name.toLowerCase().includes(list.q.toLowerCase()))
-    : filtered;
-  const total = searched.length;
-  const paged = searched.slice(list.offset, list.offset + list.pageSize);
+  const oppView = tableView(filtered, list, {
+    search: (o) => o.name,
+    comparators: {
+      created: (a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0),
+      name: (a, b) => a.name.localeCompare(b.name),
+      stage: (a, b) => a.stage.localeCompare(b.stage) || a.name.localeCompare(b.name),
+      value: (a, b) => Number(a.amount) - Number(b.amount),
+      priority: (a, b) =>
+        priorityScore(a as OppLike, today) - priorityScore(b as OppLike, today) || Number(a.amount) - Number(b.amount),
+    },
+  });
+  const total = oppView.total;
+  const paged = oppView.rows;
   const totalPages = pageCount(total, list.pageSize);
 
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {OPP_VIEWS.map((v) => {
-            const active = v === view;
-            return (
-              <Link key={v} href={listHref("/ace", { tab: "opportunities", view: v, q: list.q })} style={{ padding: "5px 10px", borderRadius: 999, fontSize: 12, textDecoration: "none", border: "1px solid var(--border)", background: active ? "var(--accent)" : "transparent", color: active ? "var(--accent-ink)" : "var(--muted)", fontWeight: active ? 600 : 400 }}>
-                {OPP_VIEW_LABELS[v]} ({counts[v]})
-              </Link>
-            );
-          })}
+        <nav aria-label="Pipeline views" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <SegmentedControl
+            options={OPP_VIEWS.map((v) => ({ value: v, label: `${OPP_VIEW_LABELS[v]} (${counts[v]})` }))}
+            value={view}
+            hrefFor={(v) => listHref("/ace", { tab: "opportunities", view: v, q: list.q })}
+          />
         </nav>
-        <SearchForm q={list.q} placeholder="Search by name…" hidden={{ tab: "opportunities", view }} />
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <SegmentedControl
+            options={[...OPP_SORTS]}
+            value={list.sort}
+            hrefFor={(s) => listHref("/ace", { tab: "opportunities", view, q: list.q, sort: s, dir: OPP_SORT_DIR[s] })}
+            size="sm"
+          />
+          <SearchForm q={list.q} placeholder="Search by name…" hidden={{ tab: "opportunities", view, sort: list.sort, dir: list.dir }} />
+        </div>
       </div>
 
       <SavedViewsBar listKey="ace:opportunities" current={{ tab: "opportunities", view, q: list.q }} />
@@ -588,17 +892,21 @@ function Opportunities({
               list.q ? (
                 <Link href="/ace?tab=opportunities" style={ctaLink}>Clear search</Link>
               ) : (
-                <Link href="/settings?tab=integrations" style={ctaLink}>Connect AWS Partner Central →</Link>
+                <Link href="/settings?section=integrations" style={ctaLink}>Connect AWS Partner Central →</Link>
               )
             }
           />
         </Panel>
       ) : (
+        <BulkProvider allIds={paged.map((o) => o.id)}>
         <div style={{ display: "grid", gap: 12 }}>
           {paged.map((o) => {
             const issues = hygieneIssues(o as OppLike, today);
             return (
-              <Card key={o.id}>
+              <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <BulkCheckbox id={o.id} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+              <Card id={`opp-${o.id}`}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <strong style={{ fontSize: 15 }}>{o.name}</strong>
                   <span style={{ color: "var(--muted)", fontSize: 12 }}>
@@ -608,7 +916,8 @@ function Opportunities({
                   </span>
                 </div>
                 <p style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  {o.accountName || "—"} · {STAGE_LABELS[o.stage]} · <Badge tone={statusTone(o.status)}>{o.status}</Badge> · Owner {o.ownerUserId ? emailById.get(o.ownerUserId) ?? "—" : "Unassigned"} · routing <Badge tone={statusTone(o.routingStatus)}>{o.routingStatus}</Badge>
+                  {o.accountName || "—"} · {STAGE_LABELS[o.stage]} · <Badge tone={statusTone(o.status)}>{o.status}</Badge>{o.status === "lost" && o.lossReason ? <Badge tone="danger">{LOSS_REASON_LABELS[o.lossReason as LossReason] ?? o.lossReason}</Badge> : null} · Owner {o.ownerUserId ? emailById.get(o.ownerUserId) ?? "—" : "Unassigned"} · routing <Badge tone={statusTone(o.routingStatus)}>{o.routingStatus}</Badge>
+                  <span>· last touch {o.lastInteraction ?? "never"}</span>
                   {o.awsContactId ? ` · AWS ${relNameById.get(o.awsContactId) ?? "contact"}` : o.awsSeller ? ` · AWS ${o.awsSeller}` : ""}
                 </p>
                 {issues.length > 0 && (
@@ -645,6 +954,13 @@ function Opportunities({
                         <option value="open">Open</option><option value="won">Won</option><option value="lost">Lost</option>
                       </select>
                     </label>
+                    <label style={labelStyle}>
+                      <span style={spanStyle}>Loss reason (applies when lost)</span>
+                      <select name="lossReason" defaultValue={o.lossReason} style={controlStyle}>
+                        <option value="">— not recorded —</option>
+                        {LOSS_REASONS.map((r) => <option key={r} value={r}>{LOSS_REASON_LABELS[r]}</option>)}
+                      </select>
+                    </label>
                     <label style={labelStyle}><span style={spanStyle}>Last interaction</span><input name="lastInteraction" type="date" defaultValue={o.lastInteraction ?? ""} style={controlStyle} /></label>
                     <label style={labelStyle}><span style={spanStyle}>Next step</span><input name="nextStep" maxLength={500} defaultValue={o.nextStep} style={controlStyle} /></label>
                     <label style={labelStyle}>
@@ -674,6 +990,29 @@ function Opportunities({
                     )}
                   </FormDrawer>
 
+                  {o.status === "open" && (
+                    <FormDrawer
+                      triggerLabel="Mark lost"
+                      triggerVariant="secondary"
+                      title={`Mark lost — ${o.name}`}
+                      action={updateOpportunity}
+                      submitLabel="Mark as lost"
+                      successMessage="Deal marked lost — reason captured for win/loss mining."
+                      hidden={{ opportunityId: o.id, status: "lost" }}
+                    >
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+                        Capture why this deal was lost — it feeds the win/loss factor analysis.
+                      </p>
+                      <label style={labelStyle}>
+                        <span style={spanStyle}>Loss reason</span>
+                        <select name="lossReason" required defaultValue="" style={controlStyle}>
+                          <option value="" disabled>Pick a reason…</option>
+                          {LOSS_REASONS.map((r) => <option key={r} value={r}>{LOSS_REASON_LABELS[r]}</option>)}
+                        </select>
+                      </label>
+                    </FormDrawer>
+                  )}
+
                   {o.routingStatus === "approved" ? (
                     <span style={{ fontSize: 12, fontWeight: 600 }}>
                       <span style={{ color: "var(--accent)" }}>Routing approved</span>
@@ -686,19 +1025,49 @@ function Opportunities({
                   ) : (
                     <span style={{ color: "var(--muted)", fontSize: 12 }}>Assign an owner to route</span>
                   )}
+                  <Link
+                    href={`/ace/${o.id}`}
+                    style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--section-accent)", textDecoration: "none" }}
+                  >
+                    Deal desk →
+                  </Link>
+                  <Link
+                    href={`/funding/eligibility?opp=${o.id}`}
+                    style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}
+                  >
+                    Funding options →
+                  </Link>
+                  {(proofCounts.get(o.id) ?? 0) > 0 && (
+                    <Link href={`/ace/${o.id}#case-studies`} style={{ textDecoration: "none" }}>
+                      <Badge tone="ok">
+                        {proofCounts.get(o.id)} proof point{proofCounts.get(o.id) === 1 ? "" : "s"}
+                      </Badge>
+                    </Link>
+                  )}
                 </div>
               </Card>
+                </div>
+              </div>
             );
           })}
         </div>
+        <BulkBar>
+          <BulkActionForm
+            action={bulkUpdateOpportunity}
+            field="ownerUserId"
+            options={members.map((m) => ({ value: m.id, label: m.email }))}
+            submitLabel="Reassign owner"
+          />
+        </BulkBar>
+        </BulkProvider>
       )}
 
       <Pagination
         page={list.page}
         totalPages={totalPages}
         total={total}
-        prevHref={listHref("/ace", { tab: "opportunities", view, q: list.q, page: list.page - 1 })}
-        nextHref={listHref("/ace", { tab: "opportunities", view, q: list.q, page: list.page + 1 })}
+        prevHref={listHref("/ace", { tab: "opportunities", view, q: list.q, sort: list.sort, dir: list.dir, page: list.page - 1 })}
+        nextHref={listHref("/ace", { tab: "opportunities", view, q: list.q, sort: list.sort, dir: list.dir, page: list.page + 1 })}
       />
     </>
   );
@@ -893,7 +1262,7 @@ function Relationships({
               list.q ? (
                 <Link href="/ace?tab=relationships" style={ctaLink}>Clear search</Link>
               ) : (
-                <Link href="/settings?tab=integrations" style={ctaLink}>Connect AWS Partner Central →</Link>
+                <Link href="/settings?section=integrations" style={ctaLink}>Connect AWS Partner Central →</Link>
               )
             }
           />
@@ -904,7 +1273,7 @@ function Relationships({
             const r = relById.get(h.id);
             const cad = cadence.get(h.id);
             return (
-              <Card key={h.id}>
+              <Card key={h.id} id={`rel-${h.id}`}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
                   <strong style={{ fontSize: 14 }}>{h.name}</strong>
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -999,6 +1368,8 @@ function Reps({
   members,
   team,
   today,
+  connection,
+  nowMs,
   rsort,
 }: {
   opps: (typeof opportunities.$inferSelect)[];
@@ -1006,6 +1377,8 @@ function Reps({
   members: ReadonlyArray<{ id: string; email: string }>;
   team: ReadonlyArray<TeamEdge>;
   today: string;
+  connection: typeof awsConnection.$inferSelect | undefined;
+  nowMs: number;
   rsort: string | undefined;
 }): ReactNode {
   const emailById = new Map(members.map((m) => [m.id, m.email]));
@@ -1072,7 +1445,7 @@ function Reps({
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
             No AWS sales contacts yet. Enable <strong>Enrich AWS team</strong> on the AWS Partner
             Central connection in{" "}
-            <Link href="/settings?tab=integrations" style={{ color: "var(--accent)", textDecoration: "none" }}>
+            <Link href="/settings?section=integrations" style={{ color: "var(--accent)", textDecoration: "none" }}>
               Settings
             </Link>{" "}
             and run a sync to pull each deal&apos;s AWS Sales Rep / PSM / PDM, or link an AWS contact
@@ -1087,7 +1460,26 @@ function Reps({
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <Panel title="AWS sales org">
+      <Panel
+        title="AWS sales org"
+        actions={
+          connection?.enabled ? (
+            <SyncStatusStrip
+              health={connectorHealth(
+                {
+                  status: connection.status as ConnectorStatus,
+                  lastSyncDate: connection.lastSyncedAt ? connection.lastSyncedAt.toISOString().slice(0, 10) : null,
+                },
+                today,
+              )}
+              lastSyncedAtMs={connection.lastSyncedAt ? connection.lastSyncedAt.getTime() : null}
+              nowMs={nowMs}
+              rowCount={summary.reps}
+              rowNoun="AWS reps"
+            />
+          ) : null
+        }
+      >
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 14 }}>
           <Stat label="AWS reps" value={String(summary.reps)} />
           <Stat label="Open pipeline" value={money(summary.openTCV)} />
@@ -1137,20 +1529,20 @@ function Reps({
       </Panel>
 
       <Panel title={`AWS reps (${rollups.length})`}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 10, fontSize: 12 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10, fontSize: 12 }}>
           <span style={{ color: "var(--muted)" }}>Sort:</span>
-          {([["priority", "Priority"], ["open", "Open opps"], ["tcv", "Pipeline"], ["won", "Won"], ["last", "Last contact"]] as const).map(([k, lbl]) => {
-            const active = activeSort === k;
-            return (
-              <Link
-                key={k}
-                href={`/ace?tab=reps&rsort=${k}`}
-                style={{ padding: "3px 10px", borderRadius: 999, textDecoration: "none", border: "1px solid var(--border)", background: active ? "var(--accent)" : "transparent", color: active ? "var(--accent-ink)" : "var(--muted)", fontWeight: active ? 600 : 400 }}
-              >
-                {lbl}
-              </Link>
-            );
-          })}
+          <SegmentedControl
+            options={[
+              { value: "priority", label: "Priority" },
+              { value: "open", label: "Open opps" },
+              { value: "tcv", label: "Pipeline" },
+              { value: "won", label: "Won" },
+              { value: "last", label: "Last contact" },
+            ]}
+            value={activeSort}
+            hrefFor={(k) => `/ace?tab=reps&rsort=${k}`}
+            size="sm"
+          />
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {sorted.map((r) => {

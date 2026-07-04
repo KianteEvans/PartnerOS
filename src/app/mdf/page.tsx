@@ -20,6 +20,7 @@ import { DeltaChip } from "@/components/ui/DeltaChip";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { Pagination } from "@/components/ui/Pagination";
 import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
 import { BulkBar } from "@/components/ui/bulk/BulkBar";
@@ -57,6 +58,7 @@ import { MdfNav } from "@/app/mdf/MdfNav";
 import { trendDelta } from "@/domain/trend";
 import { addDays } from "@/domain/dates";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
+import { moneyOrDash as money } from "@/domain/format";
 
 const SECTION = "var(--section-accent)";
 
@@ -91,7 +93,6 @@ const secondaryBtn = {
   textDecoration: "none",
 } as const;
 
-const money = (n: number | null): string => (n == null ? "—" : `$${n.toLocaleString()}`);
 
 function pillStyle(active: boolean, secondary = false): CSSProperties {
   return {
@@ -116,6 +117,8 @@ export default async function MdfPage({
   const today = new Date().toISOString().slice(0, 10);
 
   const sp = await searchParams;
+  // Deep-link prefill: Deal Desk's "Fund a marketing activity" move arrives with ?ref=<deal name>.
+  const prefillRef = typeof sp.ref === "string" ? sp.ref.slice(0, 200) : "";
   const viewParam = Array.isArray(sp.view) ? sp.view[0] : sp.view;
   const view: MdfView = isMdfView(viewParam) ? viewParam : "all";
   const activityParam = Array.isArray(sp.activity) ? sp.activity[0] : sp.activity;
@@ -281,7 +284,7 @@ export default async function MdfPage({
               <label style={labelStyle}><span style={spanStyle}>Start</span><input name="startDate" type="date" style={controlStyle} /></label>
               <label style={labelStyle}><span style={spanStyle}>End</span><input name="endDate" type="date" style={controlStyle} /></label>
               <label style={labelStyle}><span style={spanStyle}>Claim deadline</span><input name="claimDeadline" type="date" style={controlStyle} /></label>
-              <label style={labelStyle}><span style={spanStyle}>Opportunity ref</span><input name="opportunityRef" maxLength={200} style={controlStyle} /></label>
+              <label style={labelStyle}><span style={spanStyle}>Opportunity ref</span><input name="opportunityRef" maxLength={200} defaultValue={prefillRef} style={controlStyle} /></label>
               <label style={labelStyle}>
                 <span style={spanStyle}>AWS activity (optional — grounds compliance)</span>
                 <select name="catalogKey" defaultValue="" style={controlStyle}>
@@ -498,18 +501,15 @@ export default async function MdfPage({
             hidden={{ view, ...(activity !== "all" ? { activity } : {}), sort: params.sort, dir: params.dir }}
           />
         </div>
-        <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "var(--muted)" }}>Activity:</span>
-          {ACTIVITY_FILTERS.map((a) => (
-            <Link
-              key={a}
-              href={listHref("/mdf", { view, activity: a === "all" ? "" : a, q: params.q })}
-              style={pillStyle(a === activity, true)}
-            >
-              {a === "all" ? "All" : ACTIVITY_LABELS[a]}
-            </Link>
-          ))}
-        </nav>
+          <SegmentedControl
+            options={ACTIVITY_FILTERS.map((a) => ({ value: a, label: a === "all" ? "All" : ACTIVITY_LABELS[a] ?? a }))}
+            value={activity}
+            hrefFor={(a) => listHref("/mdf", { view, activity: a === "all" ? "" : a, q: params.q })}
+            size="sm"
+          />
+        </div>
       </div>
 
       <SavedViewsBar

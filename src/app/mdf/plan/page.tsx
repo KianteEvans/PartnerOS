@@ -12,10 +12,13 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { Callout } from "@/components/ui/Callout";
 import { FormDrawer } from "@/components/ui/FormDrawer";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { MdfNav } from "@/app/mdf/MdfNav";
 import { createMdfPlan } from "@/domain/mdf/plan-actions";
-import { loadPlans, availableMdf } from "@/domain/mdf/plan-load";
+import { loadPlans, availableMdf, loadActivityRecommendations } from "@/domain/mdf/plan-load";
 import { APPROVED_ACTIVITIES, INELIGIBLE_ACTIVITIES, type CatalogActivity } from "@/domain/mdf/activity-catalog";
+import type { ScoredActivity } from "@/domain/mdf/recommend-activities";
+import { money } from "@/domain/format";
 
 const SECTION = "var(--section-accent)";
 const labelStyle = { display: "grid", gap: 4, fontSize: 13 } as const;
@@ -27,7 +30,6 @@ const controlStyle = {
   padding: "8px 10px",
   color: "var(--text)",
 } as const;
-const money = (n: number): string => `$${n.toLocaleString()}`;
 
 const CATEGORY_LABELS: Record<string, string> = {
   event: "Event",
@@ -36,18 +38,36 @@ const CATEGORY_LABELS: Record<string, string> = {
   enablement: "Enablement",
   other: "Other",
 };
+const CATEGORY_FILTERS = ["all", "event", "campaign", "content", "enablement", "other"] as const;
 
-export default async function MdfPlannerPage(): Promise<ReactNode> {
+export default async function MdfPlannerPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
   const today = new Date().toISOString().slice(0, 10);
 
-  const [plans, avail] = await Promise.all([loadPlans(identity), availableMdf(identity, today)]);
+  const sp = await searchParams;
+  const catParam = Array.isArray(sp.category) ? sp.category[0] : sp.category;
+  const category = catParam && (CATEGORY_FILTERS as readonly string[]).includes(catParam) ? catParam : "all";
+
+  const [plans, avail, recs] = await Promise.all([
+    loadPlans(identity),
+    availableMdf(identity, today),
+    loadActivityRecommendations(identity),
+  ]);
+  const newestPlanId = plans[0]?.id ?? null;
+  const filterCat = (a: CatalogActivity): boolean => category === "all" || a.category === category;
+  const approved = APPROVED_ACTIVITIES.filter(filterCat);
+  const ineligible = INELIGIBLE_ACTIVITIES.filter(filterCat);
 
   return (
     <PageShell>
       <PageHeader
         title="Marketing Event Planner"
+        breadcrumbs={[{ href: "/", label: "Home" }, { href: "/mdf", label: "MDF" }, { label: "Event Planner" }]}
         actions={
           <FormDrawer
             triggerLabel="New plan"
@@ -125,24 +145,78 @@ export default async function MdfPlannerPage(): Promise<ReactNode> {
             { key: "status", header: "Status", render: (p) => <Badge tone={p.status === "archived" ? "neutral" : "info"}>{p.status}</Badge> },
             { key: "events", header: "Events", align: "right", render: (p) => String(p.itemCount) },
             { key: "cost", header: "Planned cost", align: "right", render: (p) => money(p.plannedCost) },
+            {
+              key: "due",
+              header: "Next fund request due",
+              render: (p) =>
+                p.nextDeadline ? (
+                  <span style={{ color: p.nextDeadline < today ? "var(--danger)" : "var(--muted)" }}>{p.nextDeadline}</span>
+                ) : (
+                  "—"
+                ),
+            },
             { key: "updated", header: "Updated", render: (p) => p.updatedAt.toISOString().slice(0, 10) },
           ]}
         />
       </Panel>
 
+      {/* Recommended activities tailored to the partner's objectives + MDF mix. */}
+      <Panel title="Recommended activities for you" accent={SECTION}>
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+          {recs.slice(0, 5).map((r) => (
+            <RecCard key={r.activity.key} rec={r} planId={newestPlanId} />
+          ))}
+        </div>
+      </Panel>
+
+      {/* AWS activity catalog with a category filter. */}
+      <nav aria-label="Activity category" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "var(--muted)" }}>Category:</span>
+        <SegmentedControl
+          size="sm"
+          options={CATEGORY_FILTERS.map((c) => ({ value: c, label: c === "all" ? "All" : CATEGORY_LABELS[c] ?? c }))}
+          value={category}
+          hrefFor={(c) => (c === "all" ? "/mdf/plan" : `/mdf/plan?category=${c}`)}
+        />
+      </nav>
+
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-        <Panel title={`AWS-approved activities (${APPROVED_ACTIVITIES.length})`} accent="var(--ok)">
-          <CatalogList activities={APPROVED_ACTIVITIES} approved />
+        <Panel title={`AWS-approved activities (${approved.length})`} accent="var(--ok)">
+          <CatalogList activities={approved} approved planId={newestPlanId} />
         </Panel>
-        <Panel title={`Ineligible activities (${INELIGIBLE_ACTIVITIES.length})`} accent="var(--danger)">
-          <CatalogList activities={INELIGIBLE_ACTIVITIES} approved={false} />
+        <Panel title={`Ineligible activities (${ineligible.length})`} accent="var(--danger)">
+          <CatalogList activities={ineligible} approved={false} planId={null} />
         </Panel>
       </div>
     </PageShell>
   );
 }
 
-function CatalogList({ activities, approved }: { activities: readonly CatalogActivity[]; approved: boolean }): ReactNode {
+function RecCard({ rec, planId }: { rec: ScoredActivity; planId: string | null }): ReactNode {
+  return (
+    <div style={{ display: "grid", gap: 4, padding: 12, border: "1px solid var(--border)", borderRadius: "var(--radius)", background: "var(--panel-2)" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 13.5 }}>{rec.activity.label}</strong>
+        <Badge tone="ok">Approved</Badge>
+      </div>
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{rec.rationale}</span>
+      {planId ? (
+        <Link href={`/mdf/plan/${planId}`} style={{ fontSize: 12, color: "var(--accent)" }}>Add to a plan →</Link>
+      ) : null}
+    </div>
+  );
+}
+
+function CatalogList({
+  activities,
+  approved,
+  planId,
+}: {
+  activities: readonly CatalogActivity[];
+  approved: boolean;
+  planId: string | null;
+}): ReactNode {
+  if (activities.length === 0) return <p style={{ color: "var(--muted)", margin: 0, fontSize: 13 }}>None in this category.</p>;
   return (
     <div style={{ display: "grid", gap: 10 }}>
       {activities.map((a) => (
@@ -151,6 +225,9 @@ function CatalogList({ activities, approved }: { activities: readonly CatalogAct
             <span style={{ color: approved ? "var(--ok)" : "var(--danger)", fontWeight: 700 }}>{approved ? "✓" : "✕"}</span>
             <strong style={{ fontSize: 13.5 }}>{a.label}</strong>
             <Badge tone="neutral">{CATEGORY_LABELS[a.category] ?? a.category}</Badge>
+            {approved && planId ? (
+              <Link href={`/mdf/plan/${planId}`} style={{ fontSize: 11.5, color: "var(--accent)" }}>Add to plan →</Link>
+            ) : null}
           </div>
           <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{a.description}</span>
           {a.proofRequirement ? <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Proof: {a.proofRequirement}</span> : null}

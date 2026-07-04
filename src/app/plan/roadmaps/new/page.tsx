@@ -23,6 +23,7 @@ import {
   type TierId,
 } from "@/domain/tiers/catalog";
 import { RoadmapComposer } from "@/app/plan/roadmaps/RoadmapComposer";
+import { loadRoadmapRecommendations } from "@/domain/roadmaps/recommend-load";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 13 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -174,6 +175,7 @@ export default async function NewRoadmapPage({
     label: TIER_LABELS[id],
     thresholdCount: thresholdsForTier(id).length,
   }));
+  const rec = await loadRoadmapRecommendations(identity, today, new Set());
 
   return (
     <PageShell width={980}>
@@ -189,6 +191,7 @@ export default async function NewRoadmapPage({
           currentTierLabel={TIER_LABELS[currentTier]}
           members={members}
           today={today}
+          recommendations={rec.recommendations}
         />
       </Panel>
     </PageShell>

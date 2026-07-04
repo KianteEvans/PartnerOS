@@ -7,6 +7,7 @@ import { MetricStrip } from "@/components/ui/MetricStrip";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { FormDrawer } from "@/components/ui/FormDrawer";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { createSolution } from "@/domain/solutions/actions";
 import { RENEWAL_BAND_LABELS, renewalSummary, type RenewalBand } from "@/domain/solutions/renewal";
 import {
@@ -48,10 +49,13 @@ export function SolutionsView({
   items,
   today,
   layout = "grid",
+  programOptions = [],
 }: {
   items: readonly SolutionListItem[];
   today: string;
   layout?: "grid" | "timeline";
+  /** Adopted competencies offered as the optional owning-program link. */
+  programOptions?: ReadonlyArray<{ id: string; name: string }>;
 }): ReactNode {
   const summary = renewalSummary(
     items.map((i) => ({ band: i.band, criteria: [], gapCount: 0, dueInDays: null })),
@@ -88,6 +92,19 @@ export function SolutionsView({
           ))}
         </datalist>
       </label>
+      {programOptions.length > 0 && (
+        <label style={labelStyle}>
+          <span style={spanStyle}>Owning competency</span>
+          <select name="programId" defaultValue="" style={controlStyle}>
+            <option value="">None</option>
+            {programOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
     </FormDrawer>
   );
 
@@ -134,19 +151,16 @@ export function SolutionsView({
             />
           </MetricStrip>
 
-          <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {(["grid", "timeline"] as const).map((l) => {
-              const active = layout === l;
-              return (
-                <Link
-                  key={l}
-                  href={`/programs?view=solutions&layout=${l}`}
-                  style={{ padding: "4px 12px", borderRadius: 999, fontSize: 12, textDecoration: "none", border: "1px solid var(--border)", background: active ? "var(--accent)" : "transparent", color: active ? "var(--accent-ink)" : "var(--muted)", fontWeight: active ? 600 : 400 }}
-                >
-                  {l === "grid" ? "Grid" : "Timeline"}
-                </Link>
-              );
-            })}
+          <nav aria-label="Solutions layout" style={{ display: "flex" }}>
+            <SegmentedControl
+              size="sm"
+              options={[
+                { value: "grid", label: "Grid" },
+                { value: "timeline", label: "Timeline" },
+              ]}
+              value={layout}
+              hrefFor={(l) => `/programs?view=solutions&layout=${l}`}
+            />
           </nav>
 
           {layout === "timeline" ? (
@@ -171,6 +185,14 @@ export function SolutionsView({
                   {solutionTypeLabel(s.solutionType)}
                   {s.programType ? ` · ${s.programType}` : ""} · {s.launchedCount} launched ACE{" "}
                   {s.launchedCount === 1 ? "opportunity" : "opportunities"} (12mo)
+                  {s.programId && s.programName ? (
+                    <>
+                      {" · "}
+                      <Link href={`/programs/${s.programId}`} style={{ color: "var(--accent)", textDecoration: "none" }}>
+                        {s.programName}
+                      </Link>
+                    </>
+                  ) : null}
                 </p>
               </Card>
             ))}

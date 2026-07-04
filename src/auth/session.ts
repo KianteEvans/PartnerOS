@@ -40,9 +40,30 @@ const sessionClaims = z.object({
   // Optional so pre-existing tokens (no `seen`) aren't force-expired — they pick
   // up idle enforcement on their next refresh.
   seen: z.number().int().nonnegative().optional(),
+  // Agency "act-as" context (Bet C). When present, this session is an agency
+  // operator acting INSIDE a managed workspace: tid/uid/role are the child
+  // workspace's (so the whole app is scoped to it), and `agency` carries the
+  // return-to-agency context for the "Exit to portfolio" control. Absent for
+  // ordinary sessions. Minted only by the server-side portfolio switch route,
+  // which re-verifies the agency->workspace link before signing.
+  agency: z
+    .object({
+      tid: z.string().uuid(),
+      uid: z.string().uuid(),
+      email: z.string().email(),
+      name: z.string(),
+    })
+    .optional(),
 });
 
 export type SessionClaims = z.infer<typeof sessionClaims>;
+
+export interface ActingAsContext {
+  readonly agencyTenantId: string;
+  readonly agencyUserId: string;
+  readonly agencyEmail: string;
+  readonly agencyName: string;
+}
 
 export interface ServerIdentity {
   readonly tenantId: string;
@@ -51,6 +72,8 @@ export interface ServerIdentity {
   readonly email: string;
   readonly role: SessionClaims["role"];
   readonly epoch: number;
+  /** Set only when this is an agency operator acting inside a managed workspace. */
+  readonly actingAs?: ActingAsContext;
 }
 
 function toIdentity(claims: SessionClaims): ServerIdentity {
@@ -61,6 +84,18 @@ function toIdentity(claims: SessionClaims): ServerIdentity {
     email: claims.email,
     role: claims.role,
     epoch: claims.epoch,
+    // Conditional spread keeps the property absent (not `undefined`) for ordinary
+    // sessions — required under exactOptionalPropertyTypes.
+    ...(claims.agency
+      ? {
+          actingAs: {
+            agencyTenantId: claims.agency.tid,
+            agencyUserId: claims.agency.uid,
+            agencyEmail: claims.agency.email,
+            agencyName: claims.agency.name,
+          },
+        }
+      : {}),
   };
 }
 

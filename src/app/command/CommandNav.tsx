@@ -15,6 +15,7 @@ export function CommandNav(): ReactNode {
       tabs={[
         { key: "decisions", label: "Decisions", caption: "Triage & health", href: "/command" },
         { key: "tasks", label: "Tasks", caption: "Execution backlog", href: "/command/tasks" },
+        { key: "map", label: "Map", caption: "Causal & attribution", href: "/command/graph" },
       ]}
     />
   );

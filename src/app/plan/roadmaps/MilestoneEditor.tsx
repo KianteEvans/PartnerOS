@@ -21,6 +21,7 @@ import {
   removeMilestone,
 } from "@/domain/roadmaps/actions";
 import { isMilestoneOverdue } from "@/domain/roadmaps/progress";
+import { analyzeSchedule } from "@/domain/roadmaps/schedule";
 
 /**
  * The interactive milestone list — what makes a roadmap a *living* plan.
@@ -44,6 +45,7 @@ export interface EditorMilestone {
   readonly originKind: string;
   readonly originLabel: string;
   readonly taskId: string | null;
+  readonly dependsOnId: string | null;
 }
 export interface EditorMember {
   readonly id: string;
@@ -80,6 +82,8 @@ const cardStyle: CSSProperties = {
   borderRadius: "var(--radius)",
   boxShadow: "var(--shadow)",
   padding: 14,
+  // Clear the sticky top bar when a decision deep-links to this milestone (#ms-<id>).
+  scrollMarginTop: 84,
 };
 function miniBtn(disabled: boolean): CSSProperties {
   return {
@@ -119,7 +123,7 @@ export function MilestoneEditor({
   const signature = milestones
     .map(
       (m) =>
-        `${m.id}:${m.sequence}:${m.status}:${m.ownerUserId ?? ""}:${m.taskId ?? ""}:${m.title}:${m.detail}:${m.targetDate}`,
+        `${m.id}:${m.sequence}:${m.status}:${m.ownerUserId ?? ""}:${m.taskId ?? ""}:${m.title}:${m.detail}:${m.targetDate}:${m.dependsOnId ?? ""}`,
     )
     .join("|");
   useEffect(() => {
@@ -201,16 +205,25 @@ export function MilestoneEditor({
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Real dependency labels + schedule conflicts (pure, O(n)) over the live order.
+  const seqById = new Map(order.map((m) => [m.id, m.sequence]));
+  const analysis = analyzeSchedule(
+    order.map((m) => ({ id: m.id, sequence: m.sequence, targetDate: m.targetDate, dependsOnId: m.dependsOnId })),
+  );
+  const conflictById = new Map(analysis.conflicts.map((c) => [c.id, c.predecessorSequence]));
+
   return (
     <div style={{ display: "grid", gap: 14 }}>
       {order.map((m, i) => {
-        const dependsSeq = i === 0 ? null : order[i - 1]!.sequence;
+        const predSeq = m.dependsOnId ? seqById.get(m.dependsOnId) ?? null : null;
+        const conflictPredSeq = conflictById.get(m.id);
         const isOver = overIndex === i && dragIndex !== null && dragIndex !== i;
         const pr = progress?.[m.id];
         const overdue = isMilestoneOverdue(m, today);
         return (
           <div
             key={m.id}
+            id={`ms-${m.id}`}
             onDragOver={(e) => {
               if (!isDraft) return;
               e.preventDefault();
@@ -246,6 +259,9 @@ export function MilestoneEditor({
                 )}
                 <Badge tone={STATUS_TONE[m.status]}>{STATUS_LABEL[m.status]}</Badge>
                 {overdue && <Badge tone="danger">Overdue</Badge>}
+                {conflictPredSeq !== undefined && (
+                  <Badge tone="danger">Scheduled before #{conflictPredSeq}</Badge>
+                )}
               </div>
               <span
                 style={{
@@ -255,7 +271,7 @@ export function MilestoneEditor({
                 }}
               >
                 Target {m.targetDate}
-                {dependsSeq ? ` · after #${dependsSeq}` : " · on the critical path"}
+                {predSeq ? ` · after #${predSeq}` : " · no dependency"}
               </span>
             </div>
 
@@ -371,6 +387,19 @@ export function MilestoneEditor({
                     <label style={labelStyle}>
                       <span style={spanStyle}>Target date</span>
                       <input name="targetDate" type="date" defaultValue={m.targetDate} style={control} />
+                    </label>
+                    <label style={labelStyle}>
+                      <span style={spanStyle}>Depends on</span>
+                      <select name="dependsOnId" defaultValue={m.dependsOnId ?? ""} style={control}>
+                        <option value="">No dependency</option>
+                        {order
+                          .filter((o) => o.sequence < m.sequence)
+                          .map((o) => (
+                            <option key={o.id} value={o.id}>
+                              #{o.sequence} {o.title}
+                            </option>
+                          ))}
+                      </select>
                     </label>
                   </FormDrawer>
 

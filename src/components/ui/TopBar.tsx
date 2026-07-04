@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Suspense, use, useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Brand } from "@/components/ui/Brand";
 import { OPEN_PALETTE_EVENT } from "@/components/ui/CommandPalette";
+import { emitToast } from "@/components/ui/toast";
+import { IDLE_STATE } from "@/domain/forms";
+import { dismissDecision } from "@/domain/notifications/actions";
 import type { Decision, Severity } from "@/domain/command/brief";
 
 /** The window event the mobile hamburger dispatches; Sidebar listens to open. */
@@ -17,7 +20,9 @@ const severityColor = (s: Severity): string =>
  * nav hamburger (left, mobile only) and — on every breakpoint — a notification
  * bell and an account center on the right. Both are click-to-open menus that
  * close on outside-click or Escape. Notifications are real (Command Center
- * decisions); the account menu carries identity + sign-out.
+ * decisions) but arrive as a PROMISE from the layout: the bar (and the whole
+ * page shell) streams immediately while the bell's cross-section derivation
+ * resolves behind a Suspense boundary — the layout no longer blocks on it.
  */
 export function TopBar({
   email,
@@ -26,7 +31,7 @@ export function TopBar({
 }: {
   email: string;
   role: string;
-  notifications: readonly Decision[];
+  notifications: Promise<readonly Decision[]>;
 }): ReactNode {
   const [menu, setMenu] = useState<null | "bell" | "account">(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -90,8 +95,8 @@ export function TopBar({
     };
   }, [menu]);
 
-  const count = notifications.length;
   const initial = (email.trim()[0] ?? "?").toUpperCase();
+  const toggleBell = (): void => setMenu((m) => (m === "bell" ? null : "bell"));
 
   return (
     <header
@@ -143,44 +148,17 @@ export function TopBar({
 
       <div style={{ flex: 1 }} />
 
-      {/* Right: bell + account */}
+      {/* Right: bell + account. The bell's data streams in behind Suspense — the
+          fallback is the same button with no badge, so the bar never jumps. */}
       <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center", gap: 8 }}>
-        <button
-          type="button"
-          aria-label={`Notifications${count ? ` (${count})` : ""}`}
-          aria-expanded={menu === "bell"}
-          onClick={() => setMenu((m) => (m === "bell" ? null : "bell"))}
-          style={{ ...iconButtonStyle, position: "relative" }}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          {count > 0 && (
-            <span
-              aria-hidden="true"
-              style={{
-                position: "absolute",
-                top: -3,
-                right: -3,
-                minWidth: 16,
-                height: 16,
-                padding: "0 4px",
-                borderRadius: 999,
-                background: "var(--danger)",
-                color: "#fff",
-                fontSize: 10,
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: "2px solid var(--panel)",
-              }}
-            >
-              {count > 9 ? "9+" : count}
-            </span>
-          )}
-        </button>
+        <Suspense fallback={<BellButton count={0} open={menu === "bell"} onToggle={toggleBell} />}>
+          <BellArea
+            promise={notifications}
+            open={menu === "bell"}
+            onToggle={toggleBell}
+            onNavigate={() => setMenu(null)}
+          />
+        </Suspense>
 
         <button
           type="button"
@@ -204,45 +182,6 @@ export function TopBar({
         >
           {initial}
         </button>
-
-        {menu === "bell" && (
-          <Dropdown title="Notifications">
-            {count === 0 ? (
-              <p style={{ margin: 0, padding: "18px 14px", color: "var(--muted)", fontSize: 13, textAlign: "center" }}>
-                You&rsquo;re all caught up. 🎉
-              </p>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 4, display: "grid", gap: 2, maxHeight: 360, overflowY: "auto" }}>
-                {notifications.slice(0, 12).map((n) => (
-                  <li key={n.id}>
-                    <Link
-                      href={n.link}
-                      onClick={() => setMenu(null)}
-                      className="topbar-item"
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "10px 1fr",
-                        gap: 9,
-                        padding: "9px 10px",
-                        borderRadius: 8,
-                        textDecoration: "none",
-                        color: "var(--text)",
-                      }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: 999, background: severityColor(n.severity), marginTop: 5 }} />
-                      <span style={{ minWidth: 0 }}>
-                        <span style={{ display: "block", fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {n.title}
-                        </span>
-                        <span style={{ display: "block", fontSize: 12, color: "var(--muted)" }}>{n.detail}</span>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Dropdown>
-        )}
 
         {menu === "account" && (
           <Dropdown title="Account">
@@ -306,6 +245,204 @@ export function TopBar({
         )}
       </div>
     </header>
+  );
+}
+
+/** The bell icon button, badge optional — also serves as the Suspense fallback. */
+function BellButton({
+  count,
+  open,
+  onToggle,
+}: {
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      aria-label={`Notifications${count ? ` (${count})` : ""}`}
+      aria-expanded={open}
+      onClick={onToggle}
+      style={{ ...iconButtonStyle, position: "relative" }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      </svg>
+      {count > 0 && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: -3,
+            right: -3,
+            minWidth: 16,
+            height: 16,
+            padding: "0 4px",
+            borderRadius: 999,
+            background: "var(--danger)",
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "2px solid var(--panel)",
+          }}
+        >
+          {count > 9 ? "9+" : count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Bell + dropdown once the streamed notifications resolve. `use()` suspends this
+ * subtree only; the surrounding bar renders immediately via the fallback.
+ */
+function BellArea({
+  promise,
+  open,
+  onToggle,
+  onNavigate,
+}: {
+  promise: Promise<readonly Decision[]>;
+  open: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+}): ReactNode {
+  const resolved = use(promise);
+  // Optimistically hidden after a snooze — the server list is already filtered
+  // on the next render; this covers the current, already-streamed one.
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  const notifications = resolved.filter((n) => !hidden.has(n.id));
+  const count = notifications.length;
+  return (
+    <>
+      <BellButton count={count} open={open} onToggle={onToggle} />
+      {open && (
+        <Dropdown title="Notifications">
+          {count === 0 ? (
+            <p style={{ margin: 0, padding: "18px 14px", color: "var(--muted)", fontSize: 13, textAlign: "center" }}>
+              You&rsquo;re all caught up. 🎉
+            </p>
+          ) : (
+            <ul style={{ listStyle: "none", margin: 0, padding: 4, display: "grid", gap: 2, maxHeight: 360, overflowY: "auto" }}>
+              {notifications.slice(0, 12).map((n) => (
+                <li key={n.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 2 }}>
+                  <Link
+                    href={n.link}
+                    onClick={onNavigate}
+                    className="topbar-item"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "10px 1fr",
+                      gap: 9,
+                      padding: "9px 10px",
+                      borderRadius: 8,
+                      textDecoration: "none",
+                      color: "var(--text)",
+                      minWidth: 0,
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: severityColor(n.severity), marginTop: 5 }} />
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {n.title}
+                      </span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--muted)" }}>{n.detail}</span>
+                    </span>
+                  </Link>
+                  <DismissButton
+                    decisionId={n.id}
+                    onDismissed={() => setHidden((prev) => new Set(prev).add(n.id))}
+                  />
+                </li>
+              ))}
+              {count > 12 && (
+                <li>
+                  <Link
+                    href="/command?mode=workbench"
+                    onClick={onNavigate}
+                    className="topbar-item"
+                    style={{
+                      display: "block",
+                      padding: "9px 10px",
+                      borderRadius: 8,
+                      textDecoration: "none",
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      color: "var(--accent)",
+                    }}
+                  >
+                    +{count - 12} more in the Command Center →
+                  </Link>
+                </li>
+              )}
+            </ul>
+          )}
+        </Dropdown>
+      )}
+    </>
+  );
+}
+
+/**
+ * Snooze a decision for 7 days from the bell. Tenant-wide (decision_dismissals
+ * upsert); the derived decision reappears when the snooze lapses or the
+ * underlying state resurfaces it. Hides the row optimistically via onDismissed.
+ */
+function DismissButton({
+  decisionId,
+  onDismissed,
+}: {
+  decisionId: string;
+  onDismissed: () => void;
+}): ReactNode {
+  const [state, formAction, pending] = useActionState(dismissDecision, IDLE_STATE);
+  const [token, setToken] = useState(() => crypto.randomUUID());
+
+  useEffect(() => {
+    if (state.ok) {
+      setToken(crypto.randomUUID());
+      emitToast(state.detail ?? "Snoozed.", "ok");
+      onDismissed();
+    } else if (state.error) {
+      emitToast(state.error, "danger");
+    }
+    // Mirrors MutationForm: key on `state` only — onDismissed is stable enough.
+  }, [state]);
+
+  return (
+    <form action={formAction} style={{ display: "flex", marginRight: 4 }}>
+      <input type="hidden" name="idempotencyKey" value={token} />
+      <input type="hidden" name="decisionId" value={decisionId} />
+      <button
+        type="submit"
+        disabled={pending}
+        aria-label="Snooze for 7 days"
+        title="Snooze for 7 days"
+        style={{
+          width: 24,
+          height: 24,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "transparent",
+          border: "none",
+          borderRadius: 6,
+          color: "var(--muted)",
+          fontSize: 13,
+          lineHeight: 1,
+          cursor: pending ? "default" : "pointer",
+          opacity: pending ? 0.5 : 1,
+        }}
+      >
+        {"✕"}
+      </button>
+    </form>
   );
 }
 

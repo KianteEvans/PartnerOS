@@ -329,6 +329,7 @@ describe("mdf event planner", () => {
       planOps.addPlanItemOp(ctx, {
         planId: plan.body.id,
         title: "Industry conference booth",
+        description: "Booth at a regional cloud conference.",
         catalogKey: "industry-conference", // approved / event
         totalCost: 20_000,
         coFundPct: 50,
@@ -364,6 +365,7 @@ describe("mdf event planner", () => {
       planOps.addPlanItemOp(ctx, {
         planId: plan.body.id,
         title: "Team offsite",
+        description: "Internal team retreat.",
         catalogKey: "travel", // ineligible
         totalCost: 5_000,
         coFundPct: 50,
@@ -396,5 +398,66 @@ describe("mdf event planner", () => {
     await expect(
       withTenant(identity(tenantB, ownerB), (tx) => tx.insert(mdfEventPlans).values({ tenantId: tenantA, title: "forged" })),
     ).rejects.toThrow();
+  });
+
+  it("bulk-converts only eligible, not-yet-converted events", async () => {
+    const plan = await run("mdf:create", "bconv-plan", (ctx) => planOps.createPlanOp(ctx, { title: "bulk convert", notes: "" }));
+    const mk = (key: string, catalogKey: string, totalCost: number) =>
+      run("mdf:create", `bconv-${key}`, (ctx) =>
+        planOps.addPlanItemOp(ctx, {
+          planId: plan.body.id,
+          title: `ev ${key}`,
+          description: "",
+          catalogKey,
+          totalCost,
+          coFundPct: 50,
+          expectedPipeline: 10_000,
+          expectedOpportunities: 1,
+          startDate: "2026-09-01",
+          endDate: "2026-09-03",
+          spmsId: null,
+        }),
+      );
+    const a = await mk("a", "industry-conference", 10_000);
+    const b = await mk("b", "email-campaign", 8_000);
+    const blocked = await mk("c", "travel", 4_000); // ineligible -> blocked
+
+    // Pre-convert A individually so bulk must skip it.
+    await run("mdf:create", "bconv-pre", (ctx) => planOps.convertPlanItemToRequestOp(ctx, { id: a.body.id, today: TODAY }));
+    const res = await run("mdf:create", "bconv-all", (ctx) =>
+      planOps.bulkConvertPlanItemsOp(ctx, { planId: plan.body.id, today: TODAY }),
+    );
+    expect(res.body.count).toBe(1); // only B (A already converted, C blocked)
+
+    const { withTenant } = db.client;
+    const { mdfPlanItems } = db.schema;
+    const [bRow] = await withTenant(idA(), (tx) => tx.select().from(mdfPlanItems).where(eq(mdfPlanItems.id, b.body.id)));
+    expect(bRow!.requestId).not.toBeNull();
+    const [cRow] = await withTenant(idA(), (tx) => tx.select().from(mdfPlanItems).where(eq(mdfPlanItems.id, blocked.body.id)));
+    expect(cRow!.requestId).toBeNull();
+  });
+
+  it("persists the activity description + SPMS id", async () => {
+    const plan = await run("mdf:create", "desc-plan", (ctx) => planOps.createPlanOp(ctx, { title: "desc", notes: "" }));
+    const item = await run("mdf:create", "desc-item", (ctx) =>
+      planOps.addPlanItemOp(ctx, {
+        planId: plan.body.id,
+        title: "Described event",
+        description: "A detailed marketing-plan description.",
+        catalogKey: "email-campaign",
+        totalCost: 5_000,
+        coFundPct: 50,
+        expectedPipeline: 0,
+        expectedOpportunities: 0,
+        startDate: null,
+        endDate: null,
+        spmsId: "SPMS-1",
+      }),
+    );
+    const { withTenant } = db.client;
+    const { mdfPlanItems } = db.schema;
+    const [row] = await withTenant(idA(), (tx) => tx.select().from(mdfPlanItems).where(eq(mdfPlanItems.id, item.body.id)));
+    expect(row!.description).toBe("A detailed marketing-plan description.");
+    expect(row!.spmsId).toBe("SPMS-1");
   });
 });

@@ -20,8 +20,11 @@ import {
   updateRequirementOp,
   createTaskFromRequirementOp,
   stageEvidenceForRequirementOp,
+  linkRequirementEvidenceOp,
+  bulkUpdateProgramOp,
   submitProgramOp,
 } from "@/domain/programs/operations";
+import { parseBulkIds } from "@/domain/bulk";
 
 /**
  * Program Management server actions: validation, idempotency, and Next plumbing.
@@ -156,6 +159,44 @@ export async function updateProgram(
   return { ok: true };
 }
 
+export async function bulkUpdateProgram(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const input: {
+      ids: string[];
+      status?: "pending" | "active" | "expired";
+      ownerUserId?: string | null;
+      today?: string;
+    } = { ids, today: new Date().toISOString().slice(0, 10) };
+    if (formData.has("status")) {
+      input.status = parseOrThrow(programStatusEnum, formData.get("status"));
+    }
+    if (formData.has("ownerUserId")) {
+      const o = String(formData.get("ownerUserId"));
+      input.ownerUserId = o.length > 0 ? o : null;
+    }
+    await runMutation({
+      permission: "program:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "program.bulk_update",
+      resourceType: "program",
+      auditMetadata: {
+        count: ids.length,
+        fields: Object.keys(input).filter((k) => k !== "ids" && k !== "today"),
+      },
+      handler: (ctx) => bulkUpdateProgramOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/programs");
+  return { ok: true };
+}
+
 export async function updateRequirement(
   _prev: ActionState,
   formData: FormData,
@@ -248,6 +289,33 @@ export async function stageRequirementEvidence(
   }
   if (programId) revalidatePath(`/programs/${programId}`);
   revalidatePath("/programs/evidence");
+  return { ok: true };
+}
+
+export async function linkRequirementEvidence(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const programId = String(formData.get("programId") ?? "");
+  try {
+    const { requirementId } = parseOrThrow(requirementIdSchema, {
+      requirementId: formData.get("requirementId"),
+    });
+    const raw = String(formData.get("evidenceId") ?? "");
+    const evidenceId = raw.length > 0 ? raw : null;
+    await runMutation({
+      permission: "program:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ requirementId, evidenceId }),
+      action: evidenceId ? "program.link_evidence" : "program.unlink_evidence",
+      resourceType: "program_requirement",
+      resourceId: () => requirementId,
+      handler: (ctx) => linkRequirementEvidenceOp(ctx, { requirementId, evidenceId }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  if (programId) revalidatePath(`/programs/${programId}`);
   return { ok: true };
 }
 

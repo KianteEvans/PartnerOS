@@ -16,6 +16,7 @@ import {
   recomposeRoadmapSchema,
   replanRoadmapSchema,
   isoDate,
+  optionalMilestoneRef,
 } from "@/domain/roadmaps/schemas";
 import {
   createRoadmapOp,
@@ -30,7 +31,9 @@ import {
   reopenRoadmapOp,
   replanRoadmapOp,
   finalizeRoadmapOp,
+  setRoadmapsArchivedOp,
 } from "@/domain/roadmaps/operations";
+import { parseBulkIds } from "@/domain/bulk";
 
 /**
  * Roadmap server actions: validation, idempotency-key strategy, and Next
@@ -132,6 +135,7 @@ export async function updateMilestone(
       targetDate?: string;
       title?: string;
       detail?: string;
+      dependsOnId?: string | null;
     } = { milestoneId };
     if (formData.has("ownerUserId")) {
       const o = String(formData.get("ownerUserId"));
@@ -148,6 +152,11 @@ export async function updateMilestone(
       input.title = t.slice(0, 200);
     }
     if (formData.has("detail")) input.detail = String(formData.get("detail")).slice(0, 500);
+    if (formData.has("dependsOnId")) {
+      const parsed = optionalMilestoneRef.safeParse(formData.get("dependsOnId"));
+      if (!parsed.success) throw new ValidationError("Invalid dependency");
+      input.dependsOnId = parsed.data;
+    }
 
     await runMutation({
       permission: "roadmap:update",
@@ -410,5 +419,28 @@ export async function finalizeRoadmap(
   // Finalizing a composed roadmap may adopt programs + open a tier plan.
   revalidatePath("/programs");
   revalidatePath("/programs/tiers");
+  return { ok: true };
+}
+
+export async function bulkSetRoadmapsArchived(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const archived = formData.get("archived") === "1";
+    await runMutation({
+      permission: "roadmap:archive",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ ids, archived }),
+      action: archived ? "roadmap.bulk_archive" : "roadmap.bulk_restore",
+      resourceType: "roadmap",
+      auditMetadata: { count: ids.length },
+      handler: (ctx) => setRoadmapsArchivedOp(ctx, { ids, archived }),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/plan/roadmaps");
   return { ok: true };
 }

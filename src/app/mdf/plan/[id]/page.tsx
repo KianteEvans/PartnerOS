@@ -20,6 +20,7 @@ import {
   updateMdfPlanItem,
   removeMdfPlanItem,
   convertMdfPlanItem,
+  bulkConvertMdfPlanItems,
 } from "@/domain/mdf/plan-actions";
 import { loadPlanDetail, availableMdf, type PlanItemRow } from "@/domain/mdf/plan-load";
 import {
@@ -32,9 +33,14 @@ import {
   derivedDeadlines,
   complianceChecks,
   planSummary,
+  isBlocked,
   type PlanItemLike,
   type ComplianceCheck,
 } from "@/domain/mdf/compliance";
+import { itemRoi, recommendedFit, type FitItem, type PlanFit } from "@/domain/mdf/plan-insights";
+import { PlanTimeline } from "@/app/mdf/plan/[id]/PlanTimeline";
+import { PlanViews } from "@/app/mdf/plan/[id]/PlanViews";
+import { money } from "@/domain/format";
 
 const SECTION = "var(--section-accent)";
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
@@ -47,7 +53,6 @@ const controlStyle = {
   color: "var(--text)",
   fontSize: 13,
 } as const;
-const money = (n: number): string => `$${n.toLocaleString()}`;
 
 function toLike(item: PlanItemRow): PlanItemLike {
   return {
@@ -56,6 +61,19 @@ function toLike(item: PlanItemRow): PlanItemLike {
     endDate: item.endDate,
     totalCost: item.totalCost,
     coFundPct: item.coFundPct,
+    expectedPipeline: item.expectedPipeline,
+  };
+}
+
+function toFitItem(item: PlanItemRow): FitItem {
+  return {
+    id: item.id,
+    catalogKey: item.catalogKey,
+    startDate: item.startDate,
+    endDate: item.endDate,
+    totalCost: item.totalCost,
+    coFundPct: item.coFundPct,
+    expectedPipeline: item.expectedPipeline,
   };
 }
 
@@ -73,6 +91,8 @@ export default async function MdfPlanDetailPage({
   if (!detail) notFound();
   const { plan, items } = detail;
   const summary = planSummary(items.map(toLike), avail.available, today);
+  const fit = recommendedFit(items.map(toFitItem), avail.available, today);
+  const convertibleCount = items.filter((it) => it.requestId === null && !isBlocked(toLike(it), today)).length;
 
   return (
     <PageShell width={920}>
@@ -102,6 +122,15 @@ export default async function MdfPlanDetailPage({
             {plan.status !== "archived" && (
               <MutationForm action={archiveMdfPlan} submitLabel="Archive" variant="danger" hidden={{ planId: plan.id }} />
             )}
+            <Link href={`/mdf/plan/${plan.id}/export`} style={buttonish} prefetch={false}>Export CSV</Link>
+            <Link href={`/mdf/plan/${plan.id}/print`} style={buttonish} prefetch={false}>Print packet</Link>
+            {convertibleCount > 0 && (
+              <MutationForm
+                action={bulkConvertMdfPlanItems}
+                submitLabel={`Convert all eligible (${convertibleCount})`}
+                hidden={{ planId: plan.id }}
+              />
+            )}
           </div>
         }
       />
@@ -114,6 +143,8 @@ export default async function MdfPlanDetailPage({
           <MetricCard label="Planned AWS ask" value={money(summary.eligibleAsk)} tone={summary.over ? "danger" : "neutral"} />
           <MetricCard label="Headroom" value={money(summary.headroom)} tone={summary.headroom < 0 ? "danger" : "ok"} />
           <MetricCard label="Total activity cost" value={money(summary.totalCost)} />
+          <MetricCard label="Projected pipeline" value={money(summary.projectedPipeline)} />
+          <MetricCard label="Plan ROI" value={summary.planRoi == null ? "—" : `${summary.planRoi}x`} tone="accent" />
         </MetricStrip>
         <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
           {summary.over ? (
@@ -153,11 +184,35 @@ export default async function MdfPlanDetailPage({
         {items.length === 0 ? (
           <p style={{ color: "var(--muted)", margin: 0 }}>No events yet. Add candidate events grounded in an AWS activity type.</p>
         ) : (
-          <div style={{ display: "grid", gap: 12 }}>
-            {items.map((item) => (
-              <PlanItemCard key={item.id} item={item} planId={plan.id} today={today} available={avail.available} />
-            ))}
-          </div>
+          <PlanViews
+            list={
+              <div style={{ display: "grid", gap: 12 }}>
+                {items.map((item) => (
+                  <PlanItemCard
+                    key={item.id}
+                    item={item}
+                    planId={plan.id}
+                    today={today}
+                    available={avail.available}
+                    fit={fit}
+                    over={summary.over}
+                  />
+                ))}
+              </div>
+            }
+            calendar={
+              <PlanTimeline
+                events={items.map((it) => ({
+                  id: it.id,
+                  title: it.title,
+                  startDate: it.startDate,
+                  endDate: it.endDate,
+                  blocked: isBlocked(toLike(it), today),
+                }))}
+                today={today}
+              />
+            }
+          />
         )}
       </Panel>
     </PageShell>
@@ -169,11 +224,15 @@ function PlanItemCard({
   planId,
   today,
   available,
+  fit,
+  over,
 }: {
   item: PlanItemRow;
   planId: string;
   today: string;
   available: number;
+  fit: PlanFit;
+  over: boolean;
 }): ReactNode {
   const activity = activityByKey(item.catalogKey);
   const co = coFunding(item.totalCost, item.coFundPct);
@@ -182,6 +241,9 @@ function PlanItemCard({
   const flags = checks.filter((c) => c.severity !== "ok");
   const blocked = checks.some((c) => c.severity === "block");
   const converted = item.requestId !== null;
+  const roi = itemRoi({ expectedPipeline: item.expectedPipeline, totalCost: item.totalCost, coFundPct: item.coFundPct });
+  // When the plan is over budget, mark which eligible events fit the available MDF.
+  const showFit = over && !blocked && !converted;
 
   return (
     <Card>
@@ -196,6 +258,9 @@ function PlanItemCard({
             <Badge tone="warn">No activity type</Badge>
           )}
           {blocked ? <Badge tone="danger">Blocked</Badge> : <Badge tone="ok">Eligible</Badge>}
+          {showFit ? (
+            fit.fitIds.has(item.id) ? <Badge tone="ok">Fits</Badge> : <Badge tone="warn">Defer — over budget</Badge>
+          ) : null}
         </div>
       </div>
       <p style={{ color: "var(--muted)", fontSize: 12.5, margin: "4px 0 10px" }}>
@@ -207,6 +272,7 @@ function PlanItemCard({
         <MetricCard label="Total cost" value={money(item.totalCost)} />
         <MetricCard label={`AWS ask (${item.coFundPct}%)`} value={money(co.amountToClaim)} tone="accent" />
         <MetricCard label="Your share" value={money(co.partnerShare)} />
+        <MetricCard label="ROI" value={roi == null ? "—" : `${roi}x`} tone="accent" />
         <MetricCard label="Submit by" value={deadlines.submitBy ?? "—"} />
         <MetricCard label="Claim by" value={deadlines.claimBy ?? "—"} />
       </MetricStrip>
@@ -280,6 +346,10 @@ function ItemFields({ defaults }: { defaults: PlanItemRow | null }): ReactNode {
       <label style={labelStyle}>
         <span style={spanStyle}>Event title</span>
         <input name="title" required maxLength={200} defaultValue={defaults?.title ?? ""} style={controlStyle} />
+      </label>
+      <label style={labelStyle}>
+        <span style={spanStyle}>Description (for the AWS marketing plan)</span>
+        <textarea name="description" maxLength={4000} rows={2} defaultValue={defaults?.description ?? ""} style={controlStyle} />
       </label>
       <label style={labelStyle}>
         <span style={spanStyle}>AWS activity type</span>

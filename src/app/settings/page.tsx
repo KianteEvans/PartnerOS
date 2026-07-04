@@ -12,6 +12,7 @@ import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
+import { Callout } from "@/components/ui/Callout";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { BarChart } from "@/components/ui/BarChart";
 import { ActivityList } from "@/components/ui/ActivityList";
@@ -20,6 +21,7 @@ import { FormDrawer } from "@/components/ui/FormDrawer";
 import { ScimPanel } from "@/components/ui/ScimPanel";
 import { SamlConfigPanel } from "@/components/ui/SamlConfigPanel";
 import { AwsConnectionPanel } from "@/components/ui/AwsConnectionPanel";
+import { MarketplaceConnectionPanel } from "@/components/ui/MarketplaceConnectionPanel";
 import {
   updateWorkspaceSettings,
   updateUserRole,
@@ -32,6 +34,10 @@ import {
   setConnectorStatus,
   syncConnector,
 } from "@/domain/settings/actions";
+import { setBenchmarkParticipation } from "@/domain/benchmarks/actions";
+import { approveLink, rejectLink } from "@/domain/portfolio/actions";
+import { loadIncomingLinkRequests, loadAgencyRoster } from "@/domain/portfolio/link-load";
+import { loadTenantMeta } from "@/auth/agency";
 import {
   AUTOMATION_MODES,
   AUTOMATION_MODE_LABELS,
@@ -73,6 +79,12 @@ export default async function SettingsPage({
   const canAudit = can(identity.role, "audit:read");
   const canErase = can(identity.role, "user:erase");
   const today = new Date().toISOString().slice(0, 10);
+
+  // Agency / portfolio (Bet C): incoming manage-requests (approver side) + this
+  // workspace's own agency roster when it is itself an agency.
+  const incomingLinks = await loadIncomingLinkRequests(identity);
+  const agencyMeta = await loadTenantMeta(identity.tenantId);
+  const roster = agencyMeta?.isAgency ? await loadAgencyRoster(identity) : null;
 
   const data = await withTenant(identity, async (tx) => {
     const [settings] = await tx.select().from(workspaceSettings).where(eq(workspaceSettings.tenantId, identity.tenantId));
@@ -220,6 +232,100 @@ export default async function SettingsPage({
                 )}
               </Panel>
 
+              <Panel title="Benchmarking">
+                <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13, lineHeight: 1.5 }}>
+                  Reciprocal and anonymized. When on, this workspace contributes its metrics to peer
+                  cohorts (by tier and tenure) and unlocks the Benchmarks panel showing how you
+                  compare. Every cohort is aggregated across at least 5 partners; no partner-level
+                  data is ever shown. When off, you neither contribute nor see peers.
+                </p>
+                {canManage ? (
+                  <MutationForm action={setBenchmarkParticipation} submitLabel="Save">
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        name="participating"
+                        defaultChecked={data.settings?.benchmarkParticipation ?? false}
+                      />
+                      Participate in cross-partner benchmarking
+                    </label>
+                  </MutationForm>
+                ) : (
+                  <p style={{ fontSize: 14, margin: 0 }}>
+                    Benchmarking: {data.settings?.benchmarkParticipation ? "On" : "Off"}
+                  </p>
+                )}
+              </Panel>
+
+              {incomingLinks.length > 0 && (
+                <Panel title="Managed by" accent="info">
+                  <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13, lineHeight: 1.5 }}>
+                    An agency has asked to manage this workspace. Approving lets their operators act
+                    inside it as a delegated admin — every action they take is stamped with the agency
+                    in your audit log. You can decline instead.
+                  </p>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {incomingLinks.map((rq) => (
+                      <div
+                        key={rq.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          flexWrap: "wrap",
+                          borderTop: "1px solid var(--border)",
+                          paddingTop: 10,
+                        }}
+                      >
+                        <div style={{ fontSize: 13.5 }}>
+                          <strong>{rq.agencyName}</strong>{" "}
+                          <span style={{ color: "var(--muted)" }}>({rq.agencySlug})</span>
+                        </div>
+                        {canManage ? (
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <MutationForm action={approveLink} submitLabel="Approve" hidden={{ requestId: rq.id }} />
+                            <MutationForm action={rejectLink} submitLabel="Decline" variant="danger" hidden={{ requestId: rq.id }} />
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12.5, color: "var(--muted)" }}>Ask an admin to decide.</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Panel>
+              )}
+
+              {roster && (
+                <Panel
+                  title="Organization"
+                  accent="info"
+                  actions={
+                    <Link href="/portfolio" style={{ fontSize: 12.5, color: "var(--accent)", fontWeight: 600, textDecoration: "none" }}>
+                      Open portfolio →
+                    </Link>
+                  }
+                >
+                  <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
+                    This workspace is an <strong>agency</strong> managing {roster.managed.length} workspace
+                    {roster.managed.length === 1 ? "" : "s"}
+                    {roster.outgoing.length > 0
+                      ? ` · ${roster.outgoing.length} pending request${roster.outgoing.length === 1 ? "" : "s"}`
+                      : ""}
+                    .
+                  </p>
+                  {roster.managed.length > 0 && (
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: "grid", gap: 3 }}>
+                      {roster.managed.slice(0, 6).map((m) => (
+                        <li key={m.id}>
+                          {m.name} <span style={{ color: "var(--muted)" }}>({m.tier})</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Panel>
+              )}
+
               <Panel title="Automation governance">
                 <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>{AUTOMATION_MODE_DESCRIPTIONS[mode]}</p>
                 <div style={{ marginBottom: 14 }}>
@@ -340,7 +446,11 @@ export default async function SettingsPage({
                             <Badge tone="info">{inv.role}</Badge>
                             <span style={{ color: "var(--muted)", fontSize: 12 }}>invited {inv.createdAt.toISOString().slice(0, 10)}</span>
                           </span>
-                          <MutationForm action={revokeInvitation} submitLabel="Revoke" variant="danger" hidden={{ invitationId: inv.id }} />
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            {/* inviteUserOp upserts pending invites, so re-posting = resend the email. */}
+                            <MutationForm action={inviteUser} submitLabel="Resend" variant="secondary" hidden={{ email: inv.email, role: inv.role }} />
+                            <MutationForm action={revokeInvitation} submitLabel="Revoke" variant="danger" hidden={{ invitationId: inv.id }} />
+                          </div>
                         </div>
                       ))
                     )}
@@ -382,6 +492,22 @@ export default async function SettingsPage({
                   enrichTeam: data.aws?.enrichTeam ?? false,
                   status: data.aws?.status ?? "not_configured",
                   lastError: data.aws?.lastError ?? null,
+                }}
+              />
+            </Panel>
+          )}
+
+          {active === "integrations" && canManage && (
+            <Panel title="AWS Marketplace">
+              <MarketplaceConnectionPanel
+                config={{
+                  roleArn: data.aws?.roleArn ?? "",
+                  externalId: data.aws?.externalId ?? "",
+                  region: data.aws?.region ?? "us-east-1",
+                  sellerId: data.aws?.sellerId ?? "",
+                  marketplaceEnabled: data.aws?.marketplaceEnabled ?? false,
+                  marketplaceStatus: data.aws?.marketplaceStatus ?? "not_configured",
+                  marketplaceLastError: data.aws?.marketplaceLastError ?? null,
                 }}
               />
             </Panel>
@@ -445,6 +571,20 @@ export default async function SettingsPage({
                   </div>
                 ))}
               </div>
+              {(() => {
+                const next = readiness.checks.find((c) => !c.ok);
+                if (!next) return null;
+                const href =
+                  next.key === "connector_live" ? "/settings?section=integrations" : "/settings?section=general";
+                return (
+                  <div style={{ marginTop: 14 }}>
+                    <Callout tone="info" title="Recommended next step">
+                      {next.label} isn&rsquo;t set yet.{" "}
+                      <a href={href} style={{ color: "var(--accent)", fontWeight: 600 }}>Configure →</a>
+                    </Callout>
+                  </div>
+                );
+              })()}
             </Panel>
           )}
 

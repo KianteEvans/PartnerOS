@@ -19,6 +19,11 @@ import { Pagination } from "@/components/ui/Pagination";
 import { IconAssessments } from "@/components/ui/icons";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { AskAws } from "@/components/ui/AskAws";
+import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
+import { BulkBar } from "@/components/ui/bulk/BulkBar";
+import { BulkCheckbox } from "@/components/ui/bulk/BulkCheckbox";
+import { BulkActionForm } from "@/components/ui/bulk/BulkActionForm";
+import { bulkDeleteAssessments } from "@/domain/assessments/actions";
 import { env } from "@/env";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import {
@@ -140,6 +145,7 @@ export default async function AssessmentsPage({
       </Panel>
 
       <Panel actions={<SearchForm q={params.q} placeholder="Search by name…" hidden={{ sort: params.sort, dir: params.dir }} />}>
+        <BulkProvider allIds={rows.filter((r) => r.status === "draft").map((r) => r.id)}>
         <Table
           rows={rows}
           rowKey={(r) => r.id}
@@ -167,6 +173,11 @@ export default async function AssessmentsPage({
             />
           }
           columns={[
+            {
+              key: "select",
+              header: "",
+              render: (r) => (r.status === "draft" ? <BulkCheckbox id={r.id} /> : null),
+            },
             {
               key: "name",
               header: "Name",
@@ -209,6 +220,16 @@ export default async function AssessmentsPage({
             },
           ]}
         />
+        <BulkBar>
+          <BulkActionForm
+            action={bulkDeleteAssessments}
+            submitLabel="Delete drafts"
+            variant="danger"
+            confirmMessage="Delete the selected draft assessments? This cannot be undone."
+            successMessage="Draft assessments deleted."
+          />
+        </BulkBar>
+        </BulkProvider>
         <Pagination
           page={params.page}
           totalPages={totalPages}

@@ -41,10 +41,18 @@ export interface Capability {
 export const CAPABILITIES: readonly Capability[] = [
   { key: "generate_recommendations", label: "Generate recommendations", risk: "low" },
   { key: "draft_email", label: "Draft co-sell emails", risk: "low" },
+  { key: "generate_report", label: "Generate reports", risk: "low" },
   { key: "create_task", label: "Create tasks", risk: "medium" },
   { key: "route_opportunity", label: "Route opportunities", risk: "medium" },
+  { key: "approve_request", label: "Approve funding within a cap", risk: "high" },
   { key: "send_email", label: "Send emails", risk: "high" },
+  { key: "send_webhook", label: "Post to webhooks", risk: "high" },
 ];
+
+/** Look a capability up by key; falls back to a high-risk unknown (fail safe). */
+export function getCapability(key: string): Capability {
+  return CAPABILITIES.find((c) => c.key === key) ?? { key, label: key, risk: "high" };
+}
 
 /** How a capability behaves under a mode. */
 export type CapabilityDecision = "blocked" | "recommend" | "approval" | "auto";

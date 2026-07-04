@@ -33,10 +33,11 @@ describe("tierLadder", () => {
   it("carries the per-tier requirement count and label", () => {
     const steps = tierLadder("registered", "premier");
     const reqCount = (tier: string): number => steps.find((s) => s.tier === tier)!.reqCount;
+    // Gating requirements only — the informational annual fee is not counted.
     expect(reqCount("registered")).toBe(0);
-    expect(reqCount("select")).toBe(3);
-    expect(reqCount("advanced")).toBe(4);
-    expect(reqCount("premier")).toBe(5);
+    expect(reqCount("select")).toBe(5);
+    expect(reqCount("advanced")).toBe(6);
+    expect(reqCount("premier")).toBe(9);
     expect(steps.find((s) => s.tier === "premier")!.label).toBe("Premier");
   });
 });

@@ -1,6 +1,6 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { MutationContext } from "@/gate/mutation-gate";
-import { awsConnection, partnerCentralOpportunities } from "@/db/schema";
+import { awsConnection, opportunities, partnerCentralOpportunities } from "@/db/schema";
 import { ValidationError } from "@/http/errors";
 import type { MirrorRow } from "@/domain/aws/mapping";
 
@@ -105,4 +105,48 @@ export async function syncMirrorOp(
     .set({ status: "configured", lastSyncedAt: sql`now()`, lastError: null, updatedAt: sql`now()` })
     .where(eq(awsConnection.tenantId, identity.tenantId));
   return { count: rows.length };
+}
+
+export interface AcceptTruthInput {
+  /** Local opportunity ids whose values should be overwritten by their AWS mirror. */
+  readonly ids: readonly string[];
+}
+
+/**
+ * "Accept AWS as truth": copy the read-only Partner Central mirror values onto the
+ * matching local opportunities (the editable source of record). One correlated,
+ * tenant-guarded UPDATE ... FROM — a local opp is only touched when it (a) is in the
+ * id list, (b) belongs to the tenant, and (c) has a mirror row sharing its external
+ * id. Manual opps (null external_id) never match, so partner-originated deals can't
+ * be clobbered. Fields mirror 1:1 (shared enums); source / owner / dates are left
+ * alone. Returns the number of rows updated.
+ */
+export async function acceptPartnerCentralTruthOp(
+  { identity, tx }: MutationContext,
+  input: AcceptTruthInput,
+): Promise<{ count: number }> {
+  if (input.ids.length === 0) {
+    throw new ValidationError("Select at least one opportunity to reconcile.");
+  }
+  const updated = await tx
+    .update(opportunities)
+    .set({
+      name: sql`${partnerCentralOpportunities.name}`,
+      accountName: sql`${partnerCentralOpportunities.accountName}`,
+      stage: sql`${partnerCentralOpportunities.stage}`,
+      status: sql`${partnerCentralOpportunities.status}`,
+      amount: sql`${partnerCentralOpportunities.amount}`,
+      updatedAt: sql`now()`,
+    })
+    .from(partnerCentralOpportunities)
+    .where(
+      and(
+        inArray(opportunities.id, [...input.ids]),
+        eq(opportunities.tenantId, identity.tenantId),
+        eq(partnerCentralOpportunities.tenantId, identity.tenantId),
+        eq(partnerCentralOpportunities.externalId, opportunities.externalId),
+      ),
+    )
+    .returning({ id: opportunities.id });
+  return { count: updated.length };
 }

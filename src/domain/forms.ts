@@ -11,6 +11,8 @@ import { ValidationError } from "@/http/errors";
 export interface ActionState {
   readonly ok: boolean;
   readonly error?: string;
+  /** Optional success detail; overrides the form's static successMessage toast when set. */
+  readonly detail?: string;
 }
 
 export const IDLE_STATE: ActionState = { ok: false };

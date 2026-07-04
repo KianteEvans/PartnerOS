@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   assessments,
   assessmentModules,
@@ -312,4 +312,37 @@ export async function approveAllRecommendationsOp(
     await reviewRecommendationOp(ctx, { recommendationId: r.id, decision: "approved" });
   }
   return { approved: pending.length };
+}
+
+export interface BulkDeleteInput {
+  readonly ids: readonly string[];
+}
+
+/**
+ * Bulk-delete DRAFT assessments only. Scored assessments are the historical
+ * record behind deltas, reports, and roadmap seeds, so they are never deleted
+ * here — selected scored rows are silently skipped and reported back. Child
+ * rows (modules, responses, recommendations) go with the parent via FK cascade.
+ */
+export async function bulkDeleteAssessmentsOp(
+  { identity, tx }: MutationContext,
+  input: BulkDeleteInput,
+): Promise<{ deleted: number; skipped: number }> {
+  if (input.ids.length === 0) throw new ValidationError("No rows selected");
+  const deleted = await tx
+    .delete(assessments)
+    .where(
+      and(
+        inArray(assessments.id, [...input.ids]),
+        eq(assessments.tenantId, identity.tenantId),
+        eq(assessments.status, "draft"),
+      ),
+    )
+    .returning({ id: assessments.id });
+  if (deleted.length === 0) {
+    throw new ValidationError(
+      "Only draft assessments can be deleted; none of the selected rows are drafts",
+    );
+  }
+  return { deleted: deleted.length, skipped: input.ids.length - deleted.length };
 }

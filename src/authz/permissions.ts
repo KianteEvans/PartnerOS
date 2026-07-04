@@ -22,11 +22,28 @@ export type Permission =
   | "mdf:create"
   | "mdf:update"
   | "mdf:approve"
+  | "funding:read"
+  | "funding:create"
+  | "funding:update"
+  | "funding:submit"
+  | "funding:approve"
+  | "playbook:read"
+  | "playbook:create"
+  | "playbook:update"
+  | "playbook:delete"
+  | "playbook:approve"
+  | "playbook:run"
+  | "notification:read"
+  | "notification:dismiss"
+  | "benchmark:read"
+  | "portfolio:read"
+  | "portfolio:manage"
   | "assessment:read"
   | "assessment:create"
   | "assessment:update"
   | "assessment:submit"
   | "assessment:approve"
+  | "assessment:delete"
   | "task:read"
   | "task:create"
   | "task:update"
@@ -37,6 +54,7 @@ export type Permission =
   | "roadmap:create"
   | "roadmap:update"
   | "roadmap:finalize"
+  | "roadmap:archive"
   | "evidence:read"
   | "evidence:create"
   | "evidence:update"
@@ -54,6 +72,11 @@ export type Permission =
   | "solution:read"
   | "solution:create"
   | "solution:update"
+  | "marketplace:read"
+  | "marketplace:create"
+  | "marketplace:update"
+  | "marketplace:publish"
+  | "marketplace:sync"
   | "tier:read"
   | "tier:create"
   | "tier:update"
@@ -78,6 +101,22 @@ export type Permission =
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   owner: new Set<Permission>([
     "tenant:read",
+    "funding:read",
+    "funding:create",
+    "funding:update",
+    "funding:submit",
+    "funding:approve",
+    "playbook:read",
+    "playbook:create",
+    "playbook:update",
+    "playbook:delete",
+    "playbook:approve",
+    "playbook:run",
+    "notification:read",
+    "notification:dismiss",
+    "benchmark:read",
+    "portfolio:read",
+    "portfolio:manage",
     "tenant:update",
     "user:read",
     "user:invite",
@@ -93,6 +132,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "assessment:update",
     "assessment:submit",
     "assessment:approve",
+    "assessment:delete",
     "task:read",
     "task:create",
     "task:update",
@@ -103,6 +143,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "roadmap:create",
     "roadmap:update",
     "roadmap:finalize",
+    "roadmap:archive",
     "evidence:read",
     "evidence:create",
     "evidence:update",
@@ -138,10 +179,31 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "solution:read",
     "solution:create",
     "solution:update",
+    "marketplace:read",
+    "marketplace:create",
+    "marketplace:update",
+    "marketplace:publish",
+    "marketplace:sync",
     "view:manage",
   ]),
   admin: new Set<Permission>([
     "tenant:read",
+    "funding:read",
+    "funding:create",
+    "funding:update",
+    "funding:submit",
+    "funding:approve",
+    "playbook:read",
+    "playbook:create",
+    "playbook:update",
+    "playbook:delete",
+    "playbook:approve",
+    "playbook:run",
+    "notification:read",
+    "notification:dismiss",
+    "benchmark:read",
+    "portfolio:read",
+    "portfolio:manage",
     "tenant:update",
     "user:read",
     "user:invite",
@@ -157,6 +219,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "assessment:update",
     "assessment:submit",
     "assessment:approve",
+    "assessment:delete",
     "task:read",
     "task:create",
     "task:update",
@@ -167,6 +230,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "roadmap:create",
     "roadmap:update",
     "roadmap:finalize",
+    "roadmap:archive",
     "evidence:read",
     "evidence:create",
     "evidence:update",
@@ -202,6 +266,11 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "solution:read",
     "solution:create",
     "solution:update",
+    "marketplace:read",
+    "marketplace:create",
+    "marketplace:update",
+    "marketplace:publish",
+    "marketplace:sync",
     "view:manage",
   ]),
   // A manager runs assessments end-to-end: prepare, submit, and approve the
@@ -210,6 +279,18 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   // than approving partner funding.)
   manager: new Set<Permission>([
     "tenant:read",
+    "funding:read",
+    "funding:create",
+    "funding:update",
+    "funding:submit",
+    "playbook:read",
+    "playbook:create",
+    "playbook:update",
+    "playbook:approve",
+    "playbook:run",
+    "notification:read",
+    "notification:dismiss",
+    "benchmark:read",
     "user:read",
     "audit:read",
     "mdf:read",
@@ -229,6 +310,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "roadmap:create",
     "roadmap:update",
     "roadmap:finalize",
+    "roadmap:archive",
     "evidence:read",
     "evidence:create",
     "evidence:update",
@@ -262,12 +344,24 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "solution:read",
     "solution:create",
     "solution:update",
+    "marketplace:read",
+    "marketplace:create",
+    "marketplace:update",
+    "marketplace:publish",
+    "marketplace:sync",
     "view:manage",
   ]),
   // A member prepares draft assessments; submitting and approving are gated.
   // Members own task execution: create, update, and complete their work.
   member: new Set<Permission>([
     "tenant:read",
+    "funding:read",
+    "funding:create",
+    "funding:update",
+    "playbook:read",
+    "notification:read",
+    "notification:dismiss",
+    "benchmark:read",
     "user:read",
     "mdf:read",
     "mdf:create",
@@ -294,10 +388,17 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "report:update",
     "command:read",
     "settings:read",
+    "marketplace:read",
+    "marketplace:create",
+    "marketplace:update",
     "view:manage",
   ]),
   viewer: new Set<Permission>([
     "tenant:read",
+    "funding:read",
+    "playbook:read",
+    "notification:read",
+    "benchmark:read",
     "user:read",
     "mdf:read",
     "assessment:read",
@@ -315,6 +416,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "application:read",
     "case_study:read",
     "solution:read",
+    "marketplace:read",
     "view:manage",
   ]),
 };

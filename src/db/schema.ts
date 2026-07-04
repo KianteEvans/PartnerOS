@@ -12,6 +12,7 @@ import {
   index,
   uniqueIndex,
   pgEnum,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -58,11 +59,16 @@ export const tenants = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     tier: partnerTier("tier").notNull().default("registered"),
+    // Agency / portfolio mode (drizzle/0048). is_agency marks a parent agency; a
+    // managed workspace points at its agency via agency_id (self-referential FK).
+    // Application code enforces is_agency XOR agency_id (no nested agencies).
+    isAgency: boolean("is_agency").notNull().default(false),
+    agencyId: uuid("agency_id").references((): AnyPgColumn => tenants.id),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (t) => [uniqueIndex("tenants_slug_key").on(t.slug)],
+  (t) => [uniqueIndex("tenants_slug_key").on(t.slug), index("tenants_agency_idx").on(t.agencyId)],
 );
 
 export const users = pgTable(
@@ -605,6 +611,7 @@ export const roadmaps = pgTable(
       onDelete: "set null",
     }),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1020,6 +1027,31 @@ export const applicationCaseStudies = pgTable(
   ],
 );
 
+// Curated proof points pinned to a co-sell deal. Relevance itself is derived
+// at read time (ace/case-study-match.ts); only the rep's attachments persist.
+// RLS in drizzle/0055_opportunity_case_studies.sql, in lockstep.
+export const opportunityCaseStudies = pgTable(
+  "opportunity_case_studies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    opportunityId: uuid("opportunity_id")
+      .notNull()
+      .references(() => opportunities.id, { onDelete: "cascade" }),
+    caseStudyId: uuid("case_study_id")
+      .notNull()
+      .references(() => caseStudies.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("opportunity_case_studies_unique").on(t.tenantId, t.opportunityId, t.caseStudyId),
+    index("opportunity_case_studies_opp_idx").on(t.tenantId, t.opportunityId),
+  ],
+);
+
 // Tier D: AWS Solutions -- the validated unit of a Specialization. RLS in
 // drizzle/0028_solutions.sql, in lockstep.
 export const solutionTypeEnum = pgEnum("solution_type", [
@@ -1051,11 +1083,41 @@ export const solutions = pgTable(
     url: text("url").notNull().default(""),
     marketplaceUrl: text("marketplace_url").notNull().default(""),
     renewalDate: date("renewal_date"),
+    programId: uuid("program_id").references(() => programs.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("solutions_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("solutions_tenant_idx").on(t.tenantId),
+    index("solutions_program_idx").on(t.tenantId, t.programId),
+  ],
+);
+
+/**
+ * Snooze-style dismissal of derived Command Center decisions. decision_id is
+ * the deterministic derived id (e.g. "task-overdue-<uuid>"), not an FK —
+ * decisions are recomputed per request, so a dismissal filters the derived set
+ * until dismissed_until passes. One row per (tenant, decision), reused by
+ * upsert; expired rows are inert.
+ */
+export const decisionDismissals = pgTable(
+  "decision_dismissals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    decisionId: text("decision_id").notNull(),
+    dismissedUntil: date("dismissed_until").notNull(),
+    dismissedBy: uuid("dismissed_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("decision_dismissals_unique").on(t.tenantId, t.decisionId),
+    index("decision_dismissals_until_idx").on(t.tenantId, t.dismissedUntil),
+  ],
 );
 
 // ----------------------------------------------------------------------------
@@ -1111,6 +1173,15 @@ export const tierRequirements = pgTable(
     unit: text("unit").notNull(),
     threshold: integer("threshold").notNull(),
     currentValue: integer("current_value").notNull().default(0),
+    // Catalog v2: requirement kind + an optional secondary numeric gate + a human
+    // constraint note + an informational (context-only) flag.
+    kind: text("kind").notNull().default("count"),
+    secondaryLabel: text("secondary_label"),
+    secondaryUnit: text("secondary_unit"),
+    secondaryThreshold: integer("secondary_threshold"),
+    secondaryCurrentValue: integer("secondary_current_value").notNull().default(0),
+    note: text("note").notNull().default(""),
+    informational: boolean("informational").notNull().default(false),
     ownerUserId: uuid("owner_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1183,6 +1254,11 @@ export const mdfRequests = pgTable(
     endDate: date("end_date"),
     claimDeadline: date("claim_deadline"),
     opportunityRef: text("opportunity_ref"),
+    // Trustworthy MDF -> opportunity link (drizzle/0049) for realized ROI attribution.
+    // Backfilled from opportunityRef; the free-text ref stays for display/back-compat.
+    opportunityId: uuid("opportunity_id").references(() => opportunities.id, {
+      onDelete: "set null",
+    }),
     // AWS activity-catalog grounding (drizzle/0036): the chosen catalog activity,
     // the full activity cost (requestedAmount is the AWS ask), and a branding ack.
     catalogKey: text("catalog_key"),
@@ -1282,6 +1358,7 @@ export const mdfPlanItems = pgTable(
       .notNull()
       .references(() => mdfEventPlans.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    description: text("description").notNull().default(""),
     catalogKey: text("catalog_key"),
     activityType: mdfActivityType("activity_type").notNull().default("other"),
     totalCost: integer("total_cost").notNull().default(0),
@@ -1370,6 +1447,10 @@ export const opportunities = pgTable(
     nextStep: text("next_step").notNull().default(""),
     lastInteraction: date("last_interaction"),
     closeDate: date("close_date"),
+    // Win/loss mining (drizzle/0051): why a deal was lost (app-validated catalog;
+    // '' = not recorded) + the ACTUAL close timestamp (closeDate stays the target).
+    lossReason: text("loss_reason").notNull().default(""),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
     routingStatus: routingStatus("routing_status").notNull().default("unrouted"),
     taskId: uuid("task_id").references(() => tasks.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => users.id, {
@@ -1519,6 +1600,13 @@ export const awsConnection = pgTable("aws_connection", {
   status: text("status").notNull().default("not_configured"),
   lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
   lastError: text("last_error"),
+  // AWS Marketplace connector (drizzle/0043). Toggles independently of Partner Central
+  // against the same cross-account role. AWS is the source of truth for Marketplace data.
+  marketplaceEnabled: boolean("marketplace_enabled").notNull().default(false),
+  sellerId: text("seller_id").notNull().default(""),
+  marketplaceStatus: text("marketplace_status").notNull().default("not_configured"),
+  marketplaceLastSyncedAt: timestamp("marketplace_last_synced_at", { withTimezone: true }),
+  marketplaceLastError: text("marketplace_last_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -1584,6 +1672,9 @@ export const reports = pgTable(
     periodEnd: date("period_end"),
     snapshot: jsonb("snapshot").notNull().default({}),
     summary: text("summary").notNull().default(""),
+    // Saved executive narrative (drizzle/0052) — drafted while in draft, frozen by the
+    // lifecycle, cleared on snapshot regeneration.
+    narrative: text("narrative").notNull().default(""),
     createdBy: uuid("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1626,11 +1717,47 @@ export const metricSnapshots = pgTable(
     programsTotal: integer("programs_total").notNull().default(0),
     tierPercent: integer("tier_percent"),
     healthScore: integer("health_score").notNull().default(0),
+    marketplacePublished: integer("marketplace_published").notNull().default(0),
+    marketplaceActiveEntitlements: integer("marketplace_active_entitlements").notNull().default(0),
+    marketplaceAttributedRevenueCents: bigint("marketplace_attributed_revenue_cents", { mode: "number" })
+      .notNull()
+      .default(0),
+    // Additional benchmarkable metrics (drizzle/0047). Nullable win-rate/ROI = "n/a".
+    winRatePercent: integer("win_rate_percent"),
+    evidencePercent: integer("evidence_percent").notNull().default(0),
+    mdfRoiX100: integer("mdf_roi_x100"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("metric_snapshots_tenant_day_key").on(t.tenantId, t.capturedOn)],
 );
+
+// Per-roadmap daily burn-up history for the Trajectory forecast — one row per
+// (tenant, roadmap, day), upserted on roadmap detail load. RLS in
+// drizzle/0038_roadmap_snapshots.sql, kept in lockstep with this definition.
+export const roadmapSnapshots = pgTable(
+  "roadmap_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    roadmapId: uuid("roadmap_id")
+      .notNull()
+      .references(() => roadmaps.id, { onDelete: "cascade" }),
+    capturedOn: date("captured_on").notNull(),
+    done: integer("done").notNull().default(0),
+    total: integer("total").notNull().default(0),
+    overdue: integer("overdue").notNull().default(0),
+    inProgress: integer("in_progress").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("roadmap_snapshots_roadmap_day_key").on(t.tenantId, t.roadmapId, t.capturedOn),
+  ],
+);
+export type RoadmapSnapshot = typeof roadmapSnapshots.$inferSelect;
 
 // Co-Selling Goals: org-set targets for the AWS co-sell relationship, tracked on
 // the ACE page. RLS in drizzle/0034_ace_goals.sql, lockstep. target_value is
@@ -1713,6 +1840,8 @@ export const workspaceSettings = pgTable(
     displayName: text("display_name").notNull().default(""),
     automationMode: automationMode("automation_mode").notNull().default("recommend_only"),
     emailNotifications: boolean("email_notifications").notNull().default(true),
+    // Reciprocal opt-in to cross-tenant benchmarking (drizzle/0047).
+    benchmarkParticipation: boolean("benchmark_participation").notNull().default(false),
     createdBy: uuid("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -1776,6 +1905,381 @@ export const demoRequests = pgTable(
   (t) => [index("demo_requests_created_idx").on(t.createdAt)],
 );
 
+// ----------------------------------------------------------------------------
+// AWS Marketplace (domain). AWS is the source of truth: these tables are a synced
+// mirror projection of the Catalog/Metering/Entitlement/Agreement/Reporting APIs;
+// listing edits are written through to AWS via Catalog ChangeSets. RLS in
+// drizzle/0040-0043, kept in lockstep. Money in integer cents (bigint for snapshot
+// aggregates). Reuses the per-tenant awsConnection (assumed via STS).
+// ----------------------------------------------------------------------------
+
+export const marketplaceProductType = pgEnum("marketplace_product_type", [
+  "saas",
+  "ami",
+  "container",
+  "machine_learning",
+  "professional_services",
+]);
+export const marketplaceVisibility = pgEnum("marketplace_visibility", [
+  "limited",
+  "public",
+  "restricted",
+]);
+export const marketplaceListingStatus = pgEnum("marketplace_listing_status", [
+  "draft",
+  "published",
+  "changing",
+  "archived",
+]);
+export const marketplaceDimensionType = pgEnum("marketplace_dimension_type", ["contract", "usage"]);
+export const marketplaceChangeIntent = pgEnum("marketplace_change_intent", [
+  "create",
+  "update_details",
+  "add_dimension",
+  "update_dimension",
+  "update_visibility",
+  "publish",
+]);
+export const marketplaceChangeStatus = pgEnum("marketplace_change_status", [
+  "preparing",
+  "applying",
+  "succeeded",
+  "failed",
+  "cancelled",
+]);
+export const marketplaceMeteringStatus = pgEnum("marketplace_metering_status", [
+  "pending",
+  "accepted",
+  "rejected",
+]);
+export const marketplaceAttributionMethod = pgEnum("marketplace_attribution_method", [
+  "marketplace_metering",
+  "resource_tagging",
+  "user_agent",
+]);
+export const marketplaceAttributionStatus = pgEnum("marketplace_attribution_status", [
+  "configured",
+  "active",
+  "inactive",
+]);
+
+export const marketplaceListings = pgTable(
+  "marketplace_listings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    entityId: text("entity_id").notNull(),
+    productCode: text("product_code").notNull().default(""),
+    title: text("title").notNull(),
+    productType: marketplaceProductType("product_type").notNull().default("saas"),
+    visibility: marketplaceVisibility("visibility").notNull().default("limited"),
+    status: marketplaceListingStatus("status").notNull().default("draft"),
+    description: text("description").notNull().default(""),
+    solutionId: uuid("solution_id").references(() => solutions.id, { onDelete: "set null" }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_listings_entity_idx").on(t.tenantId, t.entityId),
+    index("marketplace_listings_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export const marketplacePricingDimensions = pgTable(
+  "marketplace_pricing_dimensions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => marketplaceListings.id, { onDelete: "cascade" }),
+    apiName: text("api_name").notNull(),
+    name: text("name").notNull(),
+    unit: text("unit").notNull().default(""),
+    price: integer("price").notNull().default(0),
+    dimensionType: marketplaceDimensionType("dimension_type").notNull().default("usage"),
+    restricted: boolean("restricted").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_dimensions_unique").on(t.tenantId, t.listingId, t.apiName),
+    index("marketplace_dimensions_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+export const marketplaceChangeSets = pgTable(
+  "marketplace_change_sets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    changeSetId: text("change_set_id").notNull().default(""),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "cascade" }),
+    intent: marketplaceChangeIntent("intent").notNull(),
+    status: marketplaceChangeStatus("status").notNull().default("preparing"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    error: text("error").notNull().default(""),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("marketplace_change_sets_listing_idx").on(t.tenantId, t.listingId),
+    index("marketplace_change_sets_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export const marketplaceCustomers = pgTable(
+  "marketplace_customers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    customerIdentifier: text("customer_identifier").notNull(),
+    customerAwsAccountId: text("customer_aws_account_id").notNull().default(""),
+    productCode: text("product_code").notNull().default(""),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_customers_unique").on(t.tenantId, t.customerIdentifier),
+    index("marketplace_customers_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export const marketplaceMeteringRecords = pgTable(
+  "marketplace_metering_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => marketplaceListings.id, { onDelete: "cascade" }),
+    dimension: text("dimension").notNull(),
+    customerIdentifier: text("customer_identifier").notNull().default(""),
+    quantity: integer("quantity").notNull().default(0),
+    usageTimestamp: timestamp("usage_timestamp", { withTimezone: true }).notNull().defaultNow(),
+    status: marketplaceMeteringStatus("status").notNull().default("pending"),
+    meteringRecordId: text("metering_record_id").notNull().default(""),
+    result: text("result").notNull().default(""),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("marketplace_metering_listing_idx").on(t.tenantId, t.listingId),
+    index("marketplace_metering_tenant_idx").on(t.tenantId),
+  ],
+);
+
+export const marketplaceEntitlements = pgTable(
+  "marketplace_entitlements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    entitlementId: text("entitlement_id").notNull(),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    customerIdentifier: text("customer_identifier").notNull().default(""),
+    dimension: text("dimension").notNull().default(""),
+    value: integer("value").notNull().default(0),
+    expirationDate: date("expiration_date"),
+    agreementId: text("agreement_id").notNull().default(""),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_entitlements_unique").on(t.tenantId, t.entitlementId),
+    index("marketplace_entitlements_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+export const marketplaceAgreements = pgTable(
+  "marketplace_agreements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    agreementId: text("agreement_id").notNull(),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    customerIdentifier: text("customer_identifier").notNull().default(""),
+    offerType: text("offer_type").notNull().default(""),
+    status: text("status").notNull().default(""),
+    startDate: date("start_date"),
+    endDate: date("end_date"),
+    autoRenew: boolean("auto_renew").notNull().default(false),
+    totalValue: integer("total_value").notNull().default(0),
+    acceptanceTime: timestamp("acceptance_time", { withTimezone: true }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_agreements_unique").on(t.tenantId, t.agreementId),
+    index("marketplace_agreements_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+// Co-sell <-> Marketplace private-offer bridge (drizzle/0050). A partner-drafted
+// private offer linking an ACE opportunity to the eventual Marketplace agreement it
+// closes as. agreementId is null until the offer reconciles to a synced agreement.
+export const privateOfferStatus = pgEnum("private_offer_status", [
+  "draft",
+  "sent",
+  "accepted",
+  "declined",
+  "expired",
+  "withdrawn",
+]);
+
+export const marketplacePrivateOffers = pgTable(
+  "marketplace_private_offers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    // The co-sell deal this offer closes — the bridge to ACE.
+    opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "set null" }),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    // The reconciled AWS agreement (the transaction); null until the offer is accepted.
+    agreementId: uuid("agreement_id").references(() => marketplaceAgreements.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    customerIdentifier: text("customer_identifier").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    offerValue: integer("offer_value").notNull().default(0),
+    discountPct: integer("discount_pct").notNull().default(0),
+    currency: text("currency").notNull().default("USD"),
+    status: privateOfferStatus("status").notNull().default("draft"),
+    expirationDate: date("expiration_date"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    notes: text("notes").notNull().default(""),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("marketplace_private_offers_tenant_idx").on(t.tenantId),
+    index("marketplace_private_offers_tenant_status_idx").on(t.tenantId, t.status),
+    index("marketplace_private_offers_tenant_opp_idx").on(t.tenantId, t.opportunityId),
+  ],
+);
+
+export type MarketplacePrivateOffer = typeof marketplacePrivateOffers.$inferSelect;
+export type NewMarketplacePrivateOffer = typeof marketplacePrivateOffers.$inferInsert;
+
+export const marketplaceCharges = pgTable(
+  "marketplace_charges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    chargeRef: text("charge_ref").notNull().default(""),
+    agreementId: text("agreement_id").notNull().default(""),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    billingPeriodStart: date("billing_period_start"),
+    billingPeriodEnd: date("billing_period_end"),
+    dimension: text("dimension").notNull().default(""),
+    quantity: integer("quantity").notNull().default(0),
+    amount: integer("amount").notNull().default(0),
+    invoiceLineItem: text("invoice_line_item").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_charges_unique").on(t.tenantId, t.chargeRef),
+    index("marketplace_charges_agreement_idx").on(t.tenantId, t.agreementId),
+    index("marketplace_charges_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+export const marketplaceAttributionConfig = pgTable(
+  "marketplace_attribution_config",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    listingId: uuid("listing_id")
+      .notNull()
+      .references(() => marketplaceListings.id, { onDelete: "cascade" }),
+    method: marketplaceAttributionMethod("method").notNull(),
+    enabled: boolean("enabled").notNull().default(false),
+    status: marketplaceAttributionStatus("status").notNull().default("inactive"),
+    notes: text("notes").notNull().default(""),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_attribution_config_unique").on(t.tenantId, t.listingId, t.method),
+    index("marketplace_attribution_config_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+export const marketplaceAttributions = pgTable(
+  "marketplace_attributions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    attributionRef: text("attribution_ref").notNull(),
+    listingId: uuid("listing_id").references(() => marketplaceListings.id, { onDelete: "set null" }),
+    awsService: text("aws_service").notNull().default(""),
+    billingPeriod: text("billing_period").notNull().default(""),
+    amount: integer("amount").notNull().default(0),
+    method: marketplaceAttributionMethod("method").notNull().default("marketplace_metering"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("marketplace_attributions_unique").on(t.tenantId, t.attributionRef),
+    index("marketplace_attributions_listing_idx").on(t.tenantId, t.listingId),
+  ],
+);
+
+export const marketplaceRevenueSnapshots = pgTable(
+  "marketplace_revenue_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    capturedOn: date("captured_on").notNull(),
+    listings: integer("listings").notNull().default(0),
+    published: integer("published").notNull().default(0),
+    activeEntitlements: integer("active_entitlements").notNull().default(0),
+    meteredUsageCents: bigint("metered_usage_cents", { mode: "number" }).notNull().default(0),
+    attributedRevenueCents: bigint("attributed_revenue_cents", { mode: "number" }).notNull().default(0),
+    mrrCents: bigint("mrr_cents", { mode: "number" }).notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("marketplace_revenue_snapshots_unique").on(t.tenantId, t.capturedOn)],
+);
+
 export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
 export type User = typeof users.$inferSelect;
@@ -1821,3 +2325,226 @@ export type Connector = typeof connectors.$inferSelect;
 export type NewConnector = typeof connectors.$inferInsert;
 export type DemoRequest = typeof demoRequests.$inferSelect;
 export type NewDemoRequest = typeof demoRequests.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// AWS Funding (drizzle/0045): applications to AWS partner funding programs
+// (MAP, POC credits, ISV Workload Migration, PIF/SIF, WAFR, OLA, ...). MDF is a
+// separate deep section; this tracks submissions to the other programs.
+// ---------------------------------------------------------------------------
+export const fundingStatus = pgEnum("funding_status", [
+  "draft",
+  "submitted",
+  "in_review",
+  "approved",
+  "rejected",
+  "funded",
+  "withdrawn",
+]);
+export const fundingTypeEnum = pgEnum("funding_type", ["cash", "credits"]);
+
+export const fundingSubmissions = pgTable(
+  "funding_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    programKey: text("program_key").notNull(),
+    title: text("title").notNull(),
+    opportunityId: uuid("opportunity_id").references(() => opportunities.id, {
+      onDelete: "set null",
+    }),
+    status: fundingStatus("status").notNull().default("draft"),
+    fundingType: fundingTypeEnum("funding_type").notNull().default("cash"),
+    workloadType: text("workload_type").notNull().default(""),
+    customerSegment: text("customer_segment").notNull().default(""),
+    requestedAmount: integer("requested_amount").notNull().default(0),
+    approvedAmount: integer("approved_amount"),
+    currency: text("currency").notNull().default("USD"),
+    externalRef: text("external_ref").notNull().default(""),
+    deadline: date("deadline"),
+    decisionAt: timestamp("decision_at", { withTimezone: true }),
+    decisionNotes: text("decision_notes").notNull().default(""),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("funding_submissions_tenant_idx").on(t.tenantId),
+    index("funding_submissions_tenant_status_idx").on(t.tenantId, t.status),
+  ],
+);
+
+export type FundingSubmission = typeof fundingSubmissions.$inferSelect;
+export type NewFundingSubmission = typeof fundingSubmissions.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Automation & Playbook engine (drizzle/0046). Rules that fire actions off the
+// cross-domain decision queue, gated by automation_mode; runs are a fire-once
+// ledger; notifications are persisted + deliverable (in-app/email/webhook).
+// trigger/action/status kept as text so new situations/actions need no migration.
+// ---------------------------------------------------------------------------
+export const playbooks = pgTable(
+  "playbooks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    triggerSituation: text("trigger_situation").notNull(),
+    triggerMinSeverity: text("trigger_min_severity").notNull().default("medium"),
+    condition: jsonb("condition").$type<Record<string, unknown>>().notNull().default({}),
+    actionType: text("action_type").notNull(),
+    actionParams: jsonb("action_params").$type<Record<string, unknown>>().notNull().default({}),
+    channels: jsonb("channels").$type<string[]>().notNull().default(["in_app"]),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("playbooks_tenant_idx").on(t.tenantId),
+    index("playbooks_tenant_enabled_idx").on(t.tenantId, t.enabled),
+  ],
+);
+export type Playbook = typeof playbooks.$inferSelect;
+export type NewPlaybook = typeof playbooks.$inferInsert;
+
+export const playbookRuns = pgTable(
+  "playbook_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    playbookId: uuid("playbook_id")
+      .notNull()
+      .references(() => playbooks.id, { onDelete: "cascade" }),
+    decisionId: text("decision_id").notNull(),
+    decision: jsonb("decision").$type<Record<string, unknown>>().notNull().default({}),
+    verdict: text("verdict").notNull(),
+    status: text("status").notNull().default("recommended"),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
+    approvedBy: uuid("approved_by").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("playbook_runs_fire_once").on(t.tenantId, t.playbookId, t.decisionId),
+    index("playbook_runs_tenant_status_idx").on(t.tenantId, t.status),
+  ],
+);
+export type PlaybookRun = typeof playbookRuns.$inferSelect;
+export type NewPlaybookRun = typeof playbookRuns.$inferInsert;
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    source: text("source").notNull().default("playbook"),
+    playbookRunId: uuid("playbook_run_id").references(() => playbookRuns.id, {
+      onDelete: "set null",
+    }),
+    severity: text("severity").notNull().default("medium"),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    link: text("link").notNull().default(""),
+    dedupeKey: text("dedupe_key").notNull(),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    emailStatus: text("email_status").notNull().default("none"),
+    webhookStatus: text("webhook_status").notNull().default("none"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("notifications_dedupe").on(t.tenantId, t.dedupeKey),
+    index("notifications_tenant_user_read_idx").on(t.tenantId, t.userId, t.readAt),
+  ],
+);
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
+
+export const notificationWebhooks = pgTable(
+  "notification_webhooks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    secret: text("secret").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notification_webhooks_tenant_idx").on(t.tenantId)],
+);
+export type NotificationWebhook = typeof notificationWebhooks.$inferSelect;
+export type NewNotificationWebhook = typeof notificationWebhooks.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Cross-tenant benchmarking (drizzle/0047). Anonymized cohort percentiles — NO
+// tenant_id; one row per (dimension, cohort, metric, day). Written only by the
+// system aggregation job (withSystem owner); readable by any tenant (aggregates
+// are non-identifying). k-anonymity (>= 5) enforced in the aggregation code.
+// ---------------------------------------------------------------------------
+export const benchmarkCohorts = pgTable(
+  "benchmark_cohorts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cohortDimension: text("cohort_dimension").notNull(),
+    cohortValue: text("cohort_value").notNull(),
+    metric: text("metric").notNull(),
+    capturedOn: date("captured_on").notNull(),
+    p25: bigint("p25", { mode: "number" }).notNull().default(0),
+    p50: bigint("p50", { mode: "number" }).notNull().default(0),
+    p75: bigint("p75", { mode: "number" }).notNull().default(0),
+    p90: bigint("p90", { mode: "number" }).notNull().default(0),
+    sampleCount: integer("sample_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("benchmark_cohorts_key").on(t.cohortDimension, t.cohortValue, t.metric, t.capturedOn)],
+);
+export type BenchmarkCohort = typeof benchmarkCohorts.$inferSelect;
+export type NewBenchmarkCohort = typeof benchmarkCohorts.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Agency / portfolio mode (drizzle/0048). Claim/link consent handshake: an agency
+// requests to manage an existing workspace; the TARGET owner approves. Scoped by
+// target_tenant_id so the approver reads/decides via ordinary RLS; the agency's
+// outgoing list is read via withSystem. Provision-new + approval writes go through
+// withSystem (they touch a foreign tenant), like the rest of the provisioning code.
+// ---------------------------------------------------------------------------
+export const agencyLinkRequests = pgTable(
+  "agency_link_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agencyTenantId: uuid("agency_tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    targetTenantId: uuid("target_tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    requestedBy: uuid("requested_by").references(() => users.id, { onDelete: "set null" }),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [
+    index("agency_link_requests_target_idx").on(t.targetTenantId),
+    index("agency_link_requests_agency_idx").on(t.agencyTenantId),
+  ],
+);
+export type AgencyLinkRequest = typeof agencyLinkRequests.$inferSelect;
+export type NewAgencyLinkRequest = typeof agencyLinkRequests.$inferInsert;

@@ -14,6 +14,13 @@
       "runtimeArgs": ["--prefix", "C:\\Users\\Luis\\only-best-practices", "run", "dev"],
       "port": 3001,
       "autoPort": false
+    },
+    {
+      "name": "barberbook",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\Luis\\BarberBook", "run", "dev"],
+      "port": 3002,
+      "autoPort": false
     }
   ]
 }

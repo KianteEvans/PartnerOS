@@ -23,6 +23,16 @@ const SOLUTION_TYPES = [
 ];
 const AVAILABILITIES = ["available", "beta", "unsupported"];
 const FTR_STATUSES = ["none", "requested", "approved"];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Program select posts "" for "None"; anything else must be a uuid. */
+function parseProgramId(formData: FormData): string | null | undefined {
+  if (!formData.has("programId")) return undefined;
+  const v = String(formData.get("programId") ?? "").trim();
+  if (v === "") return null;
+  if (!UUID_RE.test(v)) throw new ValidationError("Invalid program");
+  return v;
+}
 
 function failure(err: unknown): ActionState {
   if (err instanceof AppError) {
@@ -53,6 +63,7 @@ export async function createSolution(
           title: title.slice(0, 250),
           solutionType,
           programType: String(formData.get("programType") ?? "").slice(0, 60),
+          programId: parseProgramId(formData) ?? null,
         }),
     });
     newId = res.body.id;
@@ -89,6 +100,8 @@ export async function updateSolution(
     if (formData.has("renewalDate")) {
       patch.renewalDate = String(formData.get("renewalDate")).trim() || null;
     }
+    const programId = parseProgramId(formData);
+    if (programId !== undefined) patch.programId = programId;
     await runMutation({
       permission: "solution:update",
       idempotencyKey: String(formData.get("idempotencyKey") ?? ""),

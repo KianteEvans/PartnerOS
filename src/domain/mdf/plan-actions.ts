@@ -13,6 +13,7 @@ import {
   updatePlanItemOp,
   removePlanItemOp,
   convertPlanItemToRequestOp,
+  bulkConvertPlanItemsOp,
 } from "@/domain/mdf/plan-operations";
 
 /**
@@ -33,6 +34,7 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 function itemFields(formData: FormData) {
   return parseOrThrow(planItemSchema, {
     title: formData.get("title"),
+    description: formData.get("description"),
     catalogKey: formData.get("catalogKey"),
     totalCost: formData.get("totalCost"),
     coFundPct: formData.get("coFundPct"),
@@ -184,6 +186,28 @@ export async function convertMdfPlanItem(_prev: ActionState, formData: FormData)
       handler: (ctx) => convertPlanItemToRequestOp(ctx, { id: itemId, today: today() }),
     });
     planId = res.body.planId;
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath(`/mdf/plan/${planId}`);
+  revalidatePath("/mdf");
+  return { ok: true };
+}
+
+export async function bulkConvertMdfPlanItems(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  let planId = "";
+  try {
+    planId = parseOrThrow(planIdSchema, { planId: formData.get("planId") }).planId;
+    await runMutation({
+      permission: "mdf:create",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ planId }),
+      action: "mdf.plan.bulk_convert",
+      resourceType: "mdf_event_plan",
+      resourceId: () => planId,
+      auditMetadata: { event: "mdf_plan_bulk_converted" },
+      handler: (ctx) => bulkConvertPlanItemsOp(ctx, { planId, today: today() }),
+    });
   } catch (err) {
     return failure(err);
   }

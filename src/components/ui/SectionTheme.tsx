@@ -10,7 +10,7 @@ import { useEffect } from "react";
  * root layout sets it on first load to avoid a flash; this keeps it in sync across
  * client-side navigation. Un-themed routes (home/settings) clear it -> orange.
  */
-const SECTIONS = new Set(["command", "ace", "mdf", "programs", "plan", "reports"]);
+const SECTIONS = new Set(["command", "ace", "mdf", "funding", "programs", "plan", "reports", "marketplace", "playbooks"]);
 
 export function SectionTheme(): null {
   const pathname = usePathname();

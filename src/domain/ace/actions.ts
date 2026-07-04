@@ -10,8 +10,10 @@ import {
   createInteractionSchema,
   opportunityIdSchema,
   relationshipIdSchema,
+  oppCaseStudySchema,
   stageEnum,
   statusEnum,
+  lossReasonEnum,
   roleEnum,
   isoDate,
   amount,
@@ -19,11 +21,15 @@ import {
 import {
   createOpportunityOp,
   updateOpportunityOp,
+  bulkUpdateOpportunityOp,
   approveRoutingOp,
   createRelationshipOp,
   updateRelationshipOp,
   logInteractionOp,
+  attachOppCaseStudyOp,
+  detachOppCaseStudyOp,
 } from "@/domain/ace/operations";
+import { parseBulkIds } from "@/domain/bulk";
 
 /**
  * ACE server actions: validation, idempotency, and Next plumbing only. create/
@@ -94,9 +100,11 @@ export async function updateOpportunity(
       awsContactId?: string | null;
       solutionId?: string | null;
       programId?: string | null;
+      lossReason?: string;
     } = { id: opportunityId };
     if (formData.has("stage")) input.stage = parseOrThrow(stageEnum, formData.get("stage"));
     if (formData.has("status")) input.status = parseOrThrow(statusEnum, formData.get("status"));
+    if (formData.has("lossReason")) input.lossReason = parseOrThrow(lossReasonEnum, formData.get("lossReason"));
     if (formData.has("amount")) input.amount = parseOrThrow(amount, formData.get("amount"));
     if (formData.has("ownerUserId")) {
       const o = String(formData.get("ownerUserId"));
@@ -135,6 +143,36 @@ export async function updateOpportunity(
       resourceType: "opportunity",
       resourceId: () => opportunityId,
       handler: (ctx) => updateOpportunityOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/ace");
+  return { ok: true };
+}
+
+export async function bulkUpdateOpportunity(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const ids = parseBulkIds(formData.get("ids"));
+    const input: { ids: string[]; ownerUserId?: string | null } = { ids };
+    if (formData.has("ownerUserId")) {
+      const o = String(formData.get("ownerUserId"));
+      input.ownerUserId = o.length > 0 ? o : null;
+    }
+    await runMutation({
+      permission: "ace:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "ace.bulk_update_opportunity",
+      resourceType: "opportunity",
+      auditMetadata: {
+        count: ids.length,
+        fields: Object.keys(input).filter((k) => k !== "ids"),
+      },
+      handler: (ctx) => bulkUpdateOpportunityOp(ctx, input),
     });
   } catch (err) {
     return failure(err);
@@ -266,4 +304,56 @@ export async function logInteraction(
   }
   revalidatePath("/ace");
   return { ok: true };
+}
+
+/** Pin a relevant case study to the deal (Deal Desk panel). */
+export async function attachOppCaseStudy(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const input = parseOrThrow(oppCaseStudySchema, {
+      opportunityId: formData.get("opportunityId"),
+      caseStudyId: formData.get("caseStudyId"),
+    });
+    await runMutation({
+      permission: "ace:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "ace.attach_case_study",
+      resourceType: "opportunity",
+      resourceId: () => input.opportunityId,
+      handler: (ctx) => attachOppCaseStudyOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/ace");
+  return { ok: true, detail: "Case study pinned to this deal." };
+}
+
+/** Unpin a case study from the deal. */
+export async function detachOppCaseStudy(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const input = parseOrThrow(oppCaseStudySchema, {
+      opportunityId: formData.get("opportunityId"),
+      caseStudyId: formData.get("caseStudyId"),
+    });
+    await runMutation({
+      permission: "ace:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "ace.detach_case_study",
+      resourceType: "opportunity",
+      resourceId: () => input.opportunityId,
+      handler: (ctx) => detachOppCaseStudyOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/ace");
+  return { ok: true, detail: "Case study unpinned." };
 }

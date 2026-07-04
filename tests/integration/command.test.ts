@@ -92,7 +92,7 @@ describe("command center end-to-end", () => {
     const situations = new Set(cc.decisions.map((d) => d.situation));
     expect(situations).toContain("overdue_work");
     expect(situations).toContain("mdf_deadline");
-    expect(situations).toContain("aws_review");
+    expect(situations).toContain("stalled_deal"); // the high-value opp is cold -> stalled, not aws_review
 
     expect(cc.work.overdue).toBe(1);
     expect(cc.work.critical).toBe(1);

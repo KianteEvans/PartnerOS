@@ -34,6 +34,7 @@ export function BulkActionForm({
   submitLabel,
   variant = "secondary",
   successMessage = "Updated.",
+  confirmMessage,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
   /** Name of the `<select>` field; omit for a button-only action. */
@@ -44,6 +45,8 @@ export function BulkActionForm({
   submitLabel: string;
   variant?: "primary" | "secondary" | "danger";
   successMessage?: string;
+  /** When set, a native confirm() must be accepted before the form submits. */
+  confirmMessage?: string;
 }): ReactNode {
   const { selected, clear } = useBulk();
   const [state, formAction, pending] = useActionState(action, IDLE_STATE);
@@ -71,7 +74,13 @@ export function BulkActionForm({
         : { background: "transparent", color: "var(--text)", border: "1px solid var(--border)" };
 
   return (
-    <form action={formAction} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+    <form
+      action={formAction}
+      onSubmit={(e) => {
+        if (confirmMessage && !window.confirm(confirmMessage)) e.preventDefault();
+      }}
+      style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
+    >
       <input type="hidden" name="ids" value={JSON.stringify([...selected])} />
       <input type="hidden" name="idempotencyKey" value={token} />
       {hidden &&

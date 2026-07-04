@@ -29,6 +29,7 @@ export const planSchema = z.object({
 
 export const planItemSchema = z.object({
   title: z.string().trim().min(1, "Title is required").max(200),
+  description: z.preprocess((v) => (typeof v === "string" ? v.trim() : ""), z.string().max(4000)),
   catalogKey: optionalText(80),
   totalCost: amount,
   coFundPct,

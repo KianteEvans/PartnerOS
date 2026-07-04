@@ -1,4 +1,5 @@
 import { startOidcStub } from "./oidc-stub.js";
+import { startEmailStub } from "./email-stub.js";
 
 /**
  * Launch every local stub needed to run PartnerOS without external services:
@@ -17,11 +18,13 @@ function main(): void {
     process.exit(1);
   }
   const oidc = startOidcStub();
+  const email = startEmailStub();
   console.log("[stubs] Redis -> in-memory adapter (automatic)");
   console.log("[stubs] S3    -> local filesystem adapter (automatic)");
 
   const shutdown = (): void => {
     oidc.close();
+    email.close();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);

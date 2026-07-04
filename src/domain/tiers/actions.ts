@@ -17,6 +17,7 @@ import {
   createTaskFromTierRequirementOp,
   stageEvidenceForTierRequirementOp,
   advanceTierOp,
+  syncTierMeasuredValuesOp,
 } from "@/domain/tiers/operations";
 
 /**
@@ -73,6 +74,7 @@ export async function updateTierRequirement(
     const input: {
       requirementId: string;
       currentValue?: number;
+      secondaryCurrentValue?: number;
       ownerUserId?: string | null;
       targetDate?: string | null;
     } = { requirementId };
@@ -82,6 +84,13 @@ export async function updateTierRequirement(
         throw new ValidationError("Current value must be a non-negative whole number");
       }
       input.currentValue = n;
+    }
+    if (formData.has("secondaryCurrentValue")) {
+      const n = Number(formData.get("secondaryCurrentValue"));
+      if (!Number.isInteger(n) || n < 0) {
+        throw new ValidationError("Value must be a non-negative whole number");
+      }
+      input.secondaryCurrentValue = n;
     }
     if (formData.has("ownerUserId")) {
       const o = String(formData.get("ownerUserId"));
@@ -218,4 +227,31 @@ export async function advanceTier(
   revalidatePath("/programs/tiers");
   revalidatePath("/");
   return { ok: true };
+}
+
+export async function syncTierMeasured(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await runMutation({
+      permission: "tier:update",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify({ today }),
+      action: "tier.sync_measured",
+      resourceType: "tier_plan",
+      resourceId: (r: { planId: string }) => r.planId,
+      handler: (ctx) => syncTierMeasuredValuesOp(ctx, { today }),
+    });
+    revalidatePath("/programs/tiers");
+    const changes = res.body.changes;
+    const detail =
+      changes.length === 0
+        ? "Measured values synced — nothing changed."
+        : `Synced ${changes.length} requirement${changes.length === 1 ? "" : "s"}: ${changes.slice(0, 4).join(", ")}${changes.length > 4 ? "…" : ""}`;
+    return { ok: true, detail };
+  } catch (err) {
+    return failure(err);
+  }
 }

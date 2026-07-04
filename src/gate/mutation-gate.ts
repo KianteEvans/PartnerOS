@@ -159,13 +159,22 @@ export async function runMutation<T>(
 
     // Append the audit row in the same transaction (RLS-protected).
     const resourceId = spec.resourceId ? spec.resourceId(result) : null;
+    // When an agency operator is acting inside a managed workspace, stamp the
+    // agency + real operator into the audit trail for accountability (Bet C).
+    const auditMetadata = identity.actingAs
+      ? {
+          ...(spec.auditMetadata ?? {}),
+          actingAsAgency: identity.actingAs.agencyTenantId,
+          agencyOperator: identity.actingAs.agencyUserId,
+        }
+      : (spec.auditMetadata ?? {});
     await tx.insert(auditLog).values({
       tenantId: identity.tenantId,
       actorUserId: identity.userId,
       action: spec.action,
       resourceType: spec.resourceType,
       resourceId,
-      metadata: spec.auditMetadata ?? {},
+      metadata: auditMetadata,
     });
 
     // Persist the response for future replays.

@@ -8,8 +8,11 @@ import {
   thresholdsForTier,
   CATALOG_VERSION,
   type TierId,
+  type RequirementKind,
 } from "@/domain/tiers/catalog";
 import { canAdvance, isAchievable, type RequirementValue } from "@/domain/tiers/gap";
+import { deriveByKey } from "@/domain/tiers/measure";
+import { gatherTierMeasurements } from "@/domain/tiers/load";
 
 /**
  * The database side of Partner Tier Management. Factored out of the actions so
@@ -87,6 +90,12 @@ export async function createTierPlanOp(
       category: t.category,
       unit: t.unit,
       threshold: t.threshold,
+      kind: t.kind ?? "count",
+      secondaryLabel: t.secondary?.label ?? null,
+      secondaryUnit: t.secondary?.unit ?? null,
+      secondaryThreshold: t.secondary?.threshold ?? null,
+      note: t.note ?? "",
+      informational: t.informational ?? false,
     })),
   );
   return { id: plan.id, requirements: thresholds.length };
@@ -121,6 +130,7 @@ export async function updatePlanOp(
 export interface UpdateTierRequirementInput {
   readonly requirementId: string;
   readonly currentValue?: number;
+  readonly secondaryCurrentValue?: number;
   readonly ownerUserId?: string | null;
   readonly targetDate?: string | null;
 }
@@ -134,6 +144,7 @@ export async function updateRequirementOp(
   }
   const set: Record<string, unknown> = { updatedAt: sql`now()` };
   if (input.currentValue !== undefined) set.currentValue = input.currentValue;
+  if (input.secondaryCurrentValue !== undefined) set.secondaryCurrentValue = input.secondaryCurrentValue;
   if (input.ownerUserId !== undefined) set.ownerUserId = input.ownerUserId;
   if (input.targetDate !== undefined) set.targetDate = input.targetDate;
 
@@ -161,6 +172,7 @@ async function loadRequirement(
   threshold: number;
   unit: string;
   category: string;
+  kind: string;
   ownerUserId: string | null;
   targetTier: string;
 }> {
@@ -172,6 +184,7 @@ async function loadRequirement(
       threshold: tierRequirements.threshold,
       unit: tierRequirements.unit,
       category: tierRequirements.category,
+      kind: tierRequirements.kind,
       ownerUserId: tierRequirements.ownerUserId,
       targetTier: tierPlans.targetTier,
     })
@@ -193,7 +206,10 @@ export async function createTaskFromTierRequirementOp(
 ): Promise<{ taskId: string | null }> {
   const req = await loadRequirement(ctx, input.requirementId);
   const { taskId } = await createSourcedTask(ctx, {
-    title: `Reach ${req.threshold} ${req.unit}: ${req.label}`,
+    title:
+      req.kind === "boolean"
+        ? `Complete: ${req.label}`
+        : `Reach ${req.threshold} ${req.unit}: ${req.label}`,
     description: `Close the ${req.label} gap to advance to ${req.targetTier} tier.`,
     priority: "high",
     source: "tier",
@@ -265,6 +281,10 @@ export async function advanceTierOp(
       category: tierRequirements.category,
       threshold: tierRequirements.threshold,
       currentValue: tierRequirements.currentValue,
+      kind: tierRequirements.kind,
+      secondaryThreshold: tierRequirements.secondaryThreshold,
+      secondaryCurrentValue: tierRequirements.secondaryCurrentValue,
+      informational: tierRequirements.informational,
     })
     .from(tierRequirements)
     .where(
@@ -280,6 +300,10 @@ export async function advanceTierOp(
     category: r.category,
     threshold: r.threshold,
     currentValue: r.currentValue,
+    kind: r.kind as RequirementKind,
+    secondaryThreshold: r.secondaryThreshold,
+    secondaryCurrentValue: r.secondaryCurrentValue,
+    informational: r.informational,
   }));
   if (!isAchievable(values)) {
     throw new ValidationError(
@@ -310,4 +334,65 @@ export async function advanceTierOp(
     .where(eq(tenants.id, identity.tenantId));
 
   return { tier: plan.targetTier };
+}
+
+/**
+ * Auto-measure the requirements the platform can compute (launched-opportunity
+ * count, adopted-Competency count, sustained attainment) and write them onto the
+ * plan's matching requirement rows. The DB stays the single source of truth, so the
+ * advancement gate reads these values. Manual edits remain possible; a re-sync
+ * re-applies. Best-effort over whatever the tenant has.
+ */
+export async function syncTierMeasuredValuesOp(
+  { identity, tx }: MutationContext,
+  input: { readonly today: string },
+): Promise<{ updated: number; planId: string; changes: string[] }> {
+  const [plan] = await tx
+    .select({
+      id: tierPlans.id,
+      targetTier: tierPlans.targetTier,
+      achievedAt: tierPlans.achievedAt,
+    })
+    .from(tierPlans)
+    .where(eq(tierPlans.tenantId, identity.tenantId));
+  if (!plan) throw new ValidationError("No tier plan to sync");
+
+  // Prior measured values, keyed by requirement, to detect which actually moved.
+  const current = await tx
+    .select({
+      requirementKey: tierRequirements.requirementKey,
+      label: tierRequirements.label,
+      currentValue: tierRequirements.currentValue,
+    })
+    .from(tierRequirements)
+    .where(and(eq(tierRequirements.planId, plan.id), eq(tierRequirements.tenantId, identity.tenantId)));
+  const byKey = new Map(current.map((r) => [r.requirementKey, r]));
+
+  const measurements = await gatherTierMeasurements(
+    tx,
+    identity.tenantId,
+    plan.achievedAt,
+    input.today,
+  );
+  const derived = deriveByKey(plan.targetTier as TierId, measurements);
+
+  let updated = 0;
+  const changes: string[] = [];
+  for (const [key, value] of derived) {
+    const res = await tx
+      .update(tierRequirements)
+      .set({ currentValue: value, updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(tierRequirements.planId, plan.id),
+          eq(tierRequirements.tenantId, identity.tenantId),
+          eq(tierRequirements.requirementKey, key),
+        ),
+      )
+      .returning({ id: tierRequirements.id });
+    updated += res.length;
+    const prev = byKey.get(key);
+    if (res.length > 0 && prev && prev.currentValue !== value) changes.push(prev.label);
+  }
+  return { updated, planId: plan.id, changes };
 }

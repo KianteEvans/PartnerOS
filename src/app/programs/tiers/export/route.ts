@@ -4,7 +4,7 @@ import { requirePermission } from "@/authz/permissions";
 import { withTenant } from "@/db/client";
 import { tierPlans, tierRequirements } from "@/db/schema";
 import { gapFor } from "@/domain/tiers/gap";
-import { TIER_LABELS, type TierId } from "@/domain/tiers/catalog";
+import { TIER_LABELS, type TierId, type RequirementKind } from "@/domain/tiers/catalog";
 import { AppError } from "@/http/errors";
 
 /**
@@ -32,19 +32,39 @@ export async function GET(): Promise<Response> {
 
     if (!plan) return new Response("No tier plan", { status: 404 });
 
-    const header = ["target_tier", "requirement", "category", "threshold", "current_value", "gap", "met", "has_evidence", "has_task"];
+    const header = [
+      "target_tier", "requirement", "kind", "category", "threshold", "current_value",
+      "secondary_label", "secondary_threshold", "secondary_current_value",
+      "gap", "met", "informational", "note", "has_evidence", "has_task",
+    ];
     const lines = [header.join(",")];
     for (const r of reqs) {
-      const gap = gapFor({ key: r.requirementKey, label: r.label, category: r.category, threshold: r.threshold, currentValue: r.currentValue });
+      const gap = gapFor({
+        key: r.requirementKey,
+        label: r.label,
+        category: r.category,
+        threshold: r.threshold,
+        currentValue: r.currentValue,
+        kind: r.kind as RequirementKind,
+        secondaryThreshold: r.secondaryThreshold,
+        secondaryCurrentValue: r.secondaryCurrentValue,
+        informational: r.informational,
+      });
       lines.push(
         [
           TIER_LABELS[plan.targetTier as TierId],
           r.label,
+          r.kind,
           r.category,
           r.threshold,
           r.currentValue,
+          r.secondaryLabel ?? "",
+          r.secondaryThreshold ?? "",
+          r.secondaryCurrentValue,
           gap.delta,
           gap.met ? "yes" : "no",
+          r.informational ? "yes" : "no",
+          r.note,
           r.evidenceId ? "yes" : "no",
           r.taskId ? "yes" : "no",
         ].map(csvCell).join(","),

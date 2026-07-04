@@ -303,8 +303,8 @@ describe("roadmaps end-to-end", () => {
         owners: { "program:security_competency": memberA },
       }),
     );
-    // 2 programs + advanced's 4 thresholds
-    expect(res.body.milestones).toBe(6);
+    // 2 programs + advanced's 6 gating thresholds (the informational fee is skipped)
+    expect(res.body.milestones).toBe(8);
 
     const { withTenant } = db.client;
     const { roadmaps, roadmapMilestones } = db.schema;
@@ -320,9 +320,9 @@ describe("roadmaps end-to-end", () => {
         .where(eq(roadmapMilestones.roadmapId, res.body.id))
         .orderBy(asc(roadmapMilestones.sequence)),
     );
-    expect(ms).toHaveLength(6);
+    expect(ms).toHaveLength(8);
     expect(ms.filter((m) => m.originKind === "program")).toHaveLength(2);
-    expect(ms.filter((m) => m.originKind === "tier")).toHaveLength(4);
+    expect(ms.filter((m) => m.originKind === "tier")).toHaveLength(6);
     expect(
       ms.filter((m) => m.originKind === "tier").every((m) => m.originLabel === "Advanced tier"),
     ).toBe(true);
@@ -435,7 +435,7 @@ describe("roadmaps living-plan editing (increment 2)", () => {
     expect((await milestones())[0]!.status).toBe("in_progress");
   });
 
-  it("reorders milestones and re-wires the linear dependency chain", async () => {
+  it("reorders milestones, preserving deps and clearing edges a move inverts", async () => {
     const reversed = [...ids].reverse();
     await run("roadmap:update", "lp-reorder", (ctx) =>
       ops.reorderMilestonesOp(ctx, { roadmapId: rid, orderedIds: reversed }),
@@ -443,9 +443,8 @@ describe("roadmaps living-plan editing (increment 2)", () => {
     const ms = await milestones();
     expect(ms.map((m) => m.id)).toEqual(reversed);
     expect(ms.map((m) => m.sequence)).toEqual([1, 2, 3, 4]);
-    expect(ms[0]!.dependsOnId).toBeNull();
-    expect(ms[1]!.dependsOnId).toBe(ms[0]!.id);
-    expect(ms[3]!.dependsOnId).toBe(ms[2]!.id);
+    // A full reverse inverts every linear edge, so the repair pass clears them all.
+    expect(ms.every((m) => m.dependsOnId === null)).toBe(true);
     ids = ms.map((m) => m.id);
   });
 
@@ -484,8 +483,10 @@ describe("roadmaps living-plan editing (increment 2)", () => {
     expect(ms).toHaveLength(4);
     expect(ms.some((m) => m.id === removeId)).toBe(false);
     expect(ms.map((m) => m.sequence)).toEqual([1, 2, 3, 4]);
+    // Remove recompacts sequence but preserves deps (no relinearize); the appended
+    // milestone still depends on its predecessor.
     expect(ms[0]!.dependsOnId).toBeNull();
-    expect(ms[1]!.dependsOnId).toBe(ms[0]!.id);
+    expect(ms.at(-1)!.dependsOnId).toBe(ms[2]!.id);
     ids = ms.map((m) => m.id);
   });
 
@@ -738,8 +739,8 @@ describe("roadmaps recompose a draft (T3)", () => {
         targetTier: "select",
       }),
     );
-    // isv already present -> skipped; security_competency (1) + select's 3 thresholds
-    expect(r.body.added).toBe(4);
+    // isv already present -> skipped; security_competency (1) + select's 5 gating thresholds
+    expect(r.body.added).toBe(6);
 
     const after = await withTenant(idA(), (tx) =>
       tx
@@ -748,8 +749,8 @@ describe("roadmaps recompose a draft (T3)", () => {
         .where(eq(roadmapMilestones.roadmapId, rid))
         .orderBy(asc(roadmapMilestones.sequence)),
     );
-    expect(after).toHaveLength(5);
-    expect(after.map((m) => m.sequence)).toEqual([1, 2, 3, 4, 5]);
+    expect(after).toHaveLength(7);
+    expect(after.map((m) => m.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(after[1]!.dependsOnId).toBe(after[0]!.id);
 
     const r2 = await run("roadmap:update", "recompose-2", (ctx) =>
@@ -959,5 +960,136 @@ describe("roadmaps share & iterate (T4)", () => {
         }),
       ),
     ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+});
+
+describe("milestone dependencies (scheduling realism)", () => {
+  let depRid = "";
+  let dm: Array<{ id: string; sequence: number; dependsOnId: string | null }> = [];
+  // Run this block's mutations as memberA so it gets its own rate-limit bucket
+  // (the file's other suites have already spent ownerA's budget). member has
+  // roadmap create/update.
+  const idMember = () => identity(tenantA, memberA, "member");
+
+  async function depMs(roadmapId: string) {
+    const { roadmapMilestones } = db.schema;
+    const { withTenant } = db.client;
+    return withTenant(idMember(), (tx) =>
+      tx
+        .select({
+          id: roadmapMilestones.id,
+          sequence: roadmapMilestones.sequence,
+          dependsOnId: roadmapMilestones.dependsOnId,
+        })
+        .from(roadmapMilestones)
+        .where(eq(roadmapMilestones.roadmapId, roadmapId))
+        .orderBy(asc(roadmapMilestones.sequence)),
+    );
+  }
+
+  beforeAll(async () => {
+    const res = await run(
+      "roadmap:create",
+      "dep-create",
+      (ctx) =>
+        ops.createRoadmapOp(ctx, {
+          name: "Deps",
+          objective: "",
+          horizon: "m6",
+          scenario: "standard",
+          startDate: "2026-02-01",
+          sourceAssessmentId: null,
+        }),
+      idMember,
+    );
+    depRid = res.body.id;
+    dm = await depMs(depRid);
+    expect(dm).toHaveLength(4);
+  });
+
+  it("edits a milestone to depend on an earlier one", async () => {
+    await run(
+      "roadmap:update",
+      "dep-set",
+      (ctx) => ops.updateMilestoneOp(ctx, { milestoneId: dm[2]!.id, dependsOnId: dm[0]!.id }),
+      idMember,
+    );
+    expect((await depMs(depRid))[2]!.dependsOnId).toBe(dm[0]!.id);
+  });
+
+  it("rejects a dependency on a later milestone", async () => {
+    await expect(
+      run(
+        "roadmap:update",
+        "dep-forward",
+        (ctx) => ops.updateMilestoneOp(ctx, { milestoneId: dm[0]!.id, dependsOnId: dm[1]!.id }),
+        idMember,
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("rejects a self-dependency", async () => {
+    await expect(
+      run(
+        "roadmap:update",
+        "dep-self",
+        (ctx) => ops.updateMilestoneOp(ctx, { milestoneId: dm[1]!.id, dependsOnId: dm[1]!.id }),
+        idMember,
+      ),
+    ).rejects.toBeInstanceOf(errors.ValidationError);
+  });
+
+  it("clears a dependency when set to null", async () => {
+    await run(
+      "roadmap:update",
+      "dep-clear",
+      (ctx) => ops.updateMilestoneOp(ctx, { milestoneId: dm[1]!.id, dependsOnId: null }),
+      idMember,
+    );
+    expect((await depMs(depRid))[1]!.dependsOnId).toBeNull();
+  });
+
+  it("preserves a backward custom dependency across a reorder", async () => {
+    // dm[2] depends on dm[0] (set above). Swap the last two so dm[0] stays first.
+    const cur = await depMs(depRid);
+    const order = [cur[0]!.id, cur[1]!.id, cur[3]!.id, cur[2]!.id];
+    await run(
+      "roadmap:update",
+      "dep-reorder",
+      (ctx) => ops.reorderMilestonesOp(ctx, { roadmapId: depRid, orderedIds: order }),
+      idMember,
+    );
+    const after = await depMs(depRid);
+    const moved = after.find((m) => m.id === dm[2]!.id)!;
+    expect(moved.dependsOnId).toBe(dm[0]!.id); // dm[0] still earlier -> dependency survives
+  });
+
+  it("heals dependents to the predecessor when a middle milestone is removed", async () => {
+    const res = await run(
+      "roadmap:create",
+      "heal-create",
+      (ctx) =>
+        ops.createRoadmapOp(ctx, {
+          name: "Heal",
+          objective: "",
+          horizon: "m6",
+          scenario: "standard",
+          startDate: "2026-02-01",
+          sourceAssessmentId: null,
+        }),
+      idMember,
+    );
+    const hrid = res.body.id;
+    const before = await depMs(hrid); // linear chain a <- b <- c <- d
+    // Remove b; c depended on b, so it should heal to b's predecessor a.
+    await run(
+      "roadmap:update",
+      "heal-remove",
+      (ctx) => ops.removeMilestoneOp(ctx, { milestoneId: before[1]!.id }),
+      idMember,
+    );
+    const after = await depMs(hrid);
+    const c = after.find((m) => m.id === before[2]!.id)!;
+    expect(c.dependsOnId).toBe(before[0]!.id); // healed from b to a
   });
 });

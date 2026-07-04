@@ -7,6 +7,7 @@ import {
   type WorkSummary,
 } from "@/domain/command/brief";
 import type { CommandInputs } from "@/domain/command/types";
+import { nextBestActions, type RankedAction } from "@/domain/command/next-best-action";
 
 /**
  * Pure composition of the Command Center model: health score, the decision
@@ -29,14 +30,24 @@ export interface CommandCenter {
   readonly decisions: readonly Decision[];
   readonly topRisk: Decision | null;
   readonly requiredDecision: Decision | null;
+  /** Impact-ranked prescriptive moves ("Your Move") — highest leverage first. */
+  readonly nextBestActions: readonly RankedAction[];
   readonly progress: CommandProgress;
 }
 
 export function buildCommandCenter(
   inputs: CommandInputs,
   today: string,
+  /**
+   * Snoozed decision ids to hide from the queue (presentation only). Omit for
+   * the RAW queue — the playbook runner, impact/horizon/scenario/causal
+   * analysis, report packets, and the copilot brief deliberately pass nothing
+   * so a bell snooze never silences automation or skews analysis.
+   */
+  dismissedIds?: ReadonlySet<string>,
 ): CommandCenter {
-  const decisions = deriveDecisions(inputs, today);
+  const derived = deriveDecisions(inputs, today);
+  const decisions = dismissedIds ? derived.filter((d) => !dismissedIds.has(d.id)) : derived;
   const work = workSummary(inputs.tasks, today);
   const tier = inputs.tier ? planSummary(inputs.tierRequirements) : null;
 
@@ -48,6 +59,7 @@ export function buildCommandCenter(
     // The required decision is the most urgent item that has a named owner; if
     // none is owned, fall back to the top risk.
     requiredDecision: decisions.find((d) => d.ownerUserId !== null) ?? decisions[0] ?? null,
+    nextBestActions: nextBestActions(inputs, today),
     progress: {
       programsActive: inputs.programs.filter((p) => p.status === "active").length,
       programsTotal: inputs.programs.length,

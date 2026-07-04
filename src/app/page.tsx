@@ -15,6 +15,7 @@ import { ActivityList } from "@/components/ui/ActivityList";
 import { MetricCard, type MetricTrend } from "@/components/ui/MetricCard";
 import { ButtonLink } from "@/components/ui/Button";
 import { MarketingHome } from "@/components/marketing/MarketingHome";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   IconOnboarding,
   IconAssessments,
@@ -26,12 +27,20 @@ import {
 import { loadCommandData } from "@/domain/command/load";
 import { buildCommandCenter } from "@/domain/command/aggregate";
 import { loadHubTrends, captureMetricSnapshot } from "@/domain/command/trends-load";
+import { deferAfterResponse } from "@/http/defer";
+import { loadMarketplaceTrends } from "@/domain/marketplace/load";
+import { winRate } from "@/domain/ace/opportunities";
+import { completeness } from "@/domain/evidence/inventory";
+import { portfolioSummary as mdfPortfolioSummary } from "@/domain/mdf/analytics";
+import { loadBenchmarks } from "@/domain/benchmarks/load";
+import { BenchmarksPanel } from "@/app/BenchmarksPanel";
 import { trendDelta } from "@/domain/trend";
 import type { Decision } from "@/domain/command/brief";
 import { progressPercent, stepIndex, WIZARD_STEPS, type OnboardingStepId } from "@/domain/onboarding/catalog";
 import { loadActivation } from "@/domain/onboarding/activation-load";
 import { activationChecklist } from "@/domain/onboarding/activation";
 import { HomeActivation } from "@/app/HomeActivation";
+import { moneyFromCents } from "@/domain/format";
 
 function mkTrend(
   series: number[],
@@ -40,6 +49,8 @@ function mkTrend(
   if (series.length < 2) return undefined;
   return { values: series, delta: trendDelta(series), invert: opts?.invert, deltaSuffix: opts?.suffix };
 }
+
+const money = (cents: number): string => moneyFromCents(cents, 0);
 
 /**
  * Workspace home — a true hub rather than a status card. It reuses the Command
@@ -114,22 +125,35 @@ async function SignedIn({
   }
 
   const data = await loadCommandData(identity);
-  const cc = buildCommandCenter(data.inputs, today);
-  // Record today's metrics (idempotent, best-effort) so the daily series grows, then
-  // read the dense history back for the sparklines.
-  await captureMetricSnapshot(
-    identity,
-    {
-      openWork: cc.work.open,
-      overdue: cc.work.overdue,
-      activePrograms: cc.progress.programsActive,
-      programsTotal: cc.progress.programsTotal,
-      tierPercent: cc.progress.tierPercent ?? null,
-      healthScore: cc.health.score,
-    },
-    today,
-  ).catch(() => undefined);
-  const trends = await loadHubTrends(identity);
+  const cc = buildCommandCenter(data.inputs, today, data.dismissedIds);
+  // Marketplace KPIs for the hub card + snapshot — the last point of each daily series is
+  // today's value (captured on read). Best-effort so a marketplace hiccup never blocks home.
+  const mp = await loadMarketplaceTrends(identity, today).catch(() => null);
+  const mpRevenueCents = mp?.revenue.at(-1) ?? 0;
+  // The three extra benchmarkable metrics (Bet B) — computed from the same
+  // already-loaded inputs, so the snapshot feeds the cross-tenant cohorts.
+  const mdfRoi = mdfPortfolioSummary(data.inputs.mdf, today).roi;
+  // Today's metrics, captured by value AFTER the response streams (idempotent,
+  // best-effort); the sparkline read below overlays the same values in memory so
+  // the series still ends at "now" before the write lands.
+  const snapshotValues = {
+    openWork: cc.work.open,
+    overdue: cc.work.overdue,
+    activePrograms: cc.progress.programsActive,
+    programsTotal: cc.progress.programsTotal,
+    tierPercent: cc.progress.tierPercent ?? null,
+    healthScore: cc.health.score,
+    marketplacePublished: mp?.published.at(-1) ?? 0,
+    marketplaceActiveEntitlements: mp?.activeEntitlements.at(-1) ?? 0,
+    marketplaceRevenueCents: mpRevenueCents,
+    winRatePercent: winRate(data.inputs.opportunities),
+    evidencePercent: completeness(data.inputs.evidence).percent,
+    mdfRoiX100: mdfRoi == null ? null : Math.round(mdfRoi * 100),
+  };
+  await deferAfterResponse(() => captureMetricSnapshot(identity, snapshotValues, today));
+  const trends = await loadHubTrends(identity, { today, values: snapshotValues });
+  // Cross-tenant benchmarks (Bet B) — best-effort; gated on reciprocal opt-in.
+  const benchmarks = await loadBenchmarks(identity).catch(() => ({ participating: false as const }));
   const emailById = new Map(data.members.map((m) => [m.id, m.email]));
   const ownerName = (id: string | null): string => (id ? emailById.get(id) ?? "—" : "Unassigned");
   const decisions = cc.decisions.slice(0, 5);
@@ -220,6 +244,13 @@ async function SignedIn({
             sub="to next tier"
             trend={cc.progress.tierPercent == null ? undefined : mkTrend(trends.tierProgress, { suffix: "%" })}
           />
+          <MetricCard
+            label="Marketplace revenue"
+            value={money(mpRevenueCents)}
+            sub="attributed (AWS)"
+            tint="accent"
+            trend={mkTrend(mp?.revenue ?? [])}
+          />
         </div>
       </section>
 
@@ -239,7 +270,7 @@ async function SignedIn({
         }
       >
         {decisions.length === 0 ? (
-          <p style={{ color: "var(--muted)", margin: 0 }}>You&apos;re all caught up — no open decisions.</p>
+          <EmptyState title="You're all caught up" hint="No open decisions right now." />
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {decisions.map((d) => (
@@ -248,6 +279,9 @@ async function SignedIn({
           </div>
         )}
       </Panel>
+
+      {/* Benchmarks — how you compare to anonymized peer cohorts (impossible in ACE) */}
+      <BenchmarksPanel view={benchmarks} />
 
       {/* Quick actions */}
       {actions.length > 0 && (

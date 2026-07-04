@@ -31,13 +31,13 @@ export function SolutionRenewalTimeline({
         </p>
       ) : (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginBottom: 8, paddingLeft: 172 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginBottom: 8, paddingLeft: "calc(clamp(104px, 28vw, 164px) + 8px)" }}>
             <span>{axis.start}</span>
             <span>{axis.end}</span>
           </div>
           <div style={{ display: "grid", gap: 8 }}>
             {axis.points.map((p) => (
-              <div key={p.id} style={{ display: "grid", gridTemplateColumns: "164px 1fr 92px", gap: 8, alignItems: "center", fontSize: 13 }}>
+              <div key={p.id} style={{ display: "grid", gridTemplateColumns: "clamp(104px, 28vw, 164px) 1fr clamp(64px, 16vw, 92px)", gap: 8, alignItems: "center", fontSize: 13 }}>
                 <Link
                   href={`/programs/solutions/${p.id}`}
                   title={p.title}

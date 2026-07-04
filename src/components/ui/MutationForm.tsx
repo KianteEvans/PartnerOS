@@ -48,7 +48,7 @@ export function MutationForm({
   useEffect(() => {
     if (state.ok) {
       setToken(crypto.randomUUID());
-      emitToast(successMessage, "ok");
+      emitToast(state.detail ?? successMessage, "ok");
       onSuccess?.();
     } else if (state.error) {
       emitToast(state.error, "danger");

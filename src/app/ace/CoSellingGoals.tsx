@@ -8,6 +8,7 @@ import { IconAce } from "@/components/ui/icons";
 import { METRIC_CATALOG, metricByKey, formatMetricValue, type GoalUnit } from "@/domain/ace-goals/catalog";
 import { goalProgress, STATUS_LABELS, STATUS_TONE, type StatusTone } from "@/domain/ace-goals/progress";
 import { createAceGoal, updateAceGoal } from "@/domain/ace-goals/actions";
+import { formLabel as labelStyle, formLabelSpan as spanStyle, formControlSm as controlStyle } from "@/components/ui/form-styles";
 
 /**
  * Persistent "Co-Selling Goals" panel — sits above the ACE tabs so the targets an
@@ -18,16 +19,6 @@ import { createAceGoal, updateAceGoal } from "@/domain/ace-goals/actions";
  * go through the gated server actions.
  */
 
-const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
-const spanStyle = { color: "var(--muted)" } as const;
-const controlStyle = {
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  padding: "6px 8px",
-  color: "var(--text)",
-  fontSize: 13,
-} as const;
 
 const TONE_VARS: Record<StatusTone, string> = {
   ok: "var(--ok)",

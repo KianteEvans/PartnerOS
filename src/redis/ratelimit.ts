@@ -123,3 +123,46 @@ export const recommendNarrativeRateLimiter = createRateLimiter({
   max: 10,
   windowSeconds: 60,
 });
+
+// Dedicated limiter for the optional AI roadmap narrative: 10 / 60s per actor. One
+// call summarizes a roadmap's milestones + tier coverage; same paid-API rationale.
+export const roadmapNarrativeRateLimiter = createRateLimiter({
+  max: 10,
+  windowSeconds: 60,
+});
+
+// Dedicated limiter for the Alliance Copilot: 5 questions / 60s per actor. Tighter
+// than the other AI helpers because each answer grounds on a large workspace brief
+// and uses a bigger output budget — one strategic question at a time, by design.
+export const copilotRateLimiter = createRateLimiter({
+  max: 5,
+  windowSeconds: 60,
+});
+
+// Dedicated limiter for the optional AI win/loss narrative: 10 / 60s per actor. One
+// call summarizes the computed win/loss report; same paid-API rationale.
+export const winLossNarrativeRateLimiter = createRateLimiter({
+  max: 10,
+  windowSeconds: 60,
+});
+
+// Dedicated limiter for the saved report executive narrative: 10 / 60s per actor.
+// Also covers the deterministic fallback path (it loads the whole workspace).
+export const reportNarrativeRateLimiter = createRateLimiter({
+  max: 10,
+  windowSeconds: 60,
+});
+
+// Dedicated limiter for the optional AI attribution advisor: 10 / 60s per actor.
+// One call rewrites the computed attribution insights; same paid-API rationale.
+export const attributionAdvisorRateLimiter = createRateLimiter({
+  max: 10,
+  windowSeconds: 60,
+});
+
+// Dedicated limiter for the optional AI case-study pitch on the Deal Desk: 10 / 60s
+// per actor. One call explains why the matched case studies fit one opportunity.
+export const caseStudyPitchRateLimiter = createRateLimiter({
+  max: 10,
+  windowSeconds: 60,
+});

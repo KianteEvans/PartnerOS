@@ -13,6 +13,7 @@ import {
   type ReportStatus,
 } from "@/domain/reports/metrics";
 import { AppError } from "@/http/errors";
+import { money } from "@/domain/format";
 
 /**
  * Report export. The snapshot is point-in-time data, so it can only be exported
@@ -91,7 +92,6 @@ export async function GET(
   }
 }
 
-const money = (n: number): string => `$${n.toLocaleString()}`;
 
 /** Flatten the snapshot to section,metric,value rows with human labels, plus the
  *  partnership-health composite and a change-vs-previous block. */

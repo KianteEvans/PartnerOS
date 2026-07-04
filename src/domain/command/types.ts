@@ -3,6 +3,8 @@ import type { OppLike } from "@/domain/ace/opportunities";
 import type { RepRelationship } from "@/domain/ace/rep-intelligence";
 import type { EvidenceLike } from "@/domain/evidence/inventory";
 import type { RequirementValue } from "@/domain/tiers/gap";
+import type { AwsSyncInput } from "@/domain/aws/signals";
+import type { RematchCandidate } from "@/domain/funding/rematch";
 
 /**
  * Shared input shapes for the Command Center aggregation. The domain *Like types
@@ -71,6 +73,32 @@ export interface CommandSolution {
   readonly renewalDate: string | null;
 }
 
+export interface CommandPlanEvent {
+  readonly id: string;
+  readonly planId: string;
+  readonly title: string;
+  /** Derived AWS fund-request submit-by deadline (null when undated). */
+  readonly submitBy: string | null;
+  /** Already converted into a request (no longer needs a fund request). */
+  readonly converted: boolean;
+  readonly ownerUserId: string | null;
+}
+
+/** Per-listing AWS Marketplace rollup for the cross-section "needs attention" signals. */
+export interface CommandMarketplaceListing {
+  readonly id: string;
+  readonly title: string;
+  readonly published: boolean;
+  /** Active customer entitlements expiring within 30 days. */
+  readonly expiringEntitlements: number;
+  readonly expiredEntitlements: number;
+  /** AWS Catalog change sets in a failed terminal state. */
+  readonly failedChangeSets: number;
+  /** Accepted BatchMeterUsage records (0 on a published listing => a metering gap). */
+  readonly acceptedUsageCount: number;
+  readonly attributedRevenueCents: number;
+}
+
 export interface CommandInputs {
   readonly tasks: readonly CommandTask[];
   readonly mdf: readonly CommandMdf[];
@@ -86,4 +114,24 @@ export interface CommandInputs {
   readonly solutions: readonly CommandSolution[];
   /** Tenant partner tier (renewal-readiness reads it per Solution). */
   readonly currentTier: string;
+  /** Planned events awaiting a fund request, for submit-by deadline signals. */
+  readonly planEvents?: readonly CommandPlanEvent[] | undefined;
+  /** Per-listing AWS Marketplace rollups, for entitlement / change-set / revenue-gap signals. */
+  readonly marketplace?: readonly CommandMarketplaceListing[] | undefined;
+  /** Partner Central connection freshness + opportunity drift, for sync-health signals. */
+  readonly awsSync?: AwsSyncInput | undefined;
+  /** Open AWS funding submissions, for response-deadline signals. */
+  readonly fundingSubmissions?: readonly CommandFundingSubmission[] | undefined;
+  /** Open deals eligible for un-applied AWS funding, for the proactive re-match signal. */
+  readonly fundingRematch?: readonly RematchCandidate[] | undefined;
+}
+
+/** An open AWS funding submission, for the Command Center response-deadline signal. */
+export interface CommandFundingSubmission {
+  readonly id: string;
+  readonly title: string;
+  /** Non-terminal (not funded/rejected/withdrawn). */
+  readonly open: boolean;
+  readonly deadline: string | null;
+  readonly ownerUserId: string | null;
 }
