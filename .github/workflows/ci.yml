@@ -29,6 +29,16 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Supply-chain gate: fail the build on CRITICAL advisories in PRODUCTION
+      # deps. Critical-only (not high) is deliberate — it's the actionable floor
+      # that rarely false-positives; high/moderate advisories are frequently
+      # unfixable transitive ones (e.g. postcss via next) and are surfaced +
+      # auto-PR'd by .github/dependabot.yml rather than blocking every build.
+      # Dev-only advisories are excluded. (With GitHub Dependency Graph / GHAS,
+      # actions/dependency-review-action on pull_request is a stronger add-on.)
+      - name: Audit dependencies
+        run: npm audit --omit=dev --audit-level=critical
+
       # Unit + integration tests. Integration tests start a real Postgres via
       # embedded-postgres (downloaded binary) so RLS isolation is genuinely
       # exercised — no Docker service needed.

@@ -6,6 +6,8 @@ import { coFunding, derivedDeadlines, planSummary } from "@/domain/mdf/complianc
 import { activityByKey } from "@/domain/mdf/activity-catalog";
 import { PrintButton } from "@/app/plan/roadmaps/PrintButton";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * Chrome-free AWS marketing-plan packet for a plan: print-isolation CSS hides the
@@ -24,6 +26,8 @@ export default async function MdfPlanPrintPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("mdf");
+  if (fenced) return <PackageFence feature="mdf" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const [detail, avail] = await Promise.all([loadPlanDetail(identity, id), availableMdf(identity, today)]);

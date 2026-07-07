@@ -25,7 +25,13 @@ const span: CSSProperties = { fontWeight: 600, color: "var(--muted)" };
 const row: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap" };
 const hint: CSSProperties = { fontSize: 11.5, color: "var(--muted)" };
 
-export function NewPlaybookDrawer({ members }: { members: ReadonlyArray<{ id: string; email: string }> }): ReactNode {
+export function NewPlaybookDrawer({
+  members,
+  showWebhook = true,
+}: {
+  members: ReadonlyArray<{ id: string; email: string }>;
+  showWebhook?: boolean;
+}): ReactNode {
   return (
     <FormDrawer
       triggerLabel="New playbook"
@@ -123,11 +129,17 @@ export function NewPlaybookDrawer({ members }: { members: ReadonlyArray<{ id: st
           <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" name="channels" value="email" /> Email
           </label>
-          <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input type="checkbox" name="channels" value="webhook" /> Webhook
-          </label>
+          {showWebhook && (
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" name="channels" value="webhook" /> Webhook
+            </label>
+          )}
         </div>
-        <span style={hint}>Email/webhook are high-risk external sends and follow the same approval gate.</span>
+        <span style={hint}>
+          {showWebhook
+            ? "Email/webhook are high-risk external sends and follow the same approval gate."
+            : "Email is a high-risk external send and follows the approval gate. Webhook delivery is part of Enterprise."}
+        </span>
       </div>
     </FormDrawer>
   );

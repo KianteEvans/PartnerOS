@@ -25,6 +25,7 @@ import {
   IconOnboarding,
   type IconProps,
 } from "@/components/ui/icons";
+import { isPathIncluded, type PackageTier } from "@/domain/packaging/catalog";
 
 /** Other client components dispatch this to open the palette (e.g. the TopBar). */
 export const OPEN_PALETTE_EVENT = "partneros:open-palette";
@@ -81,7 +82,7 @@ interface Item {
   readonly Icon?: (p: IconProps) => ReactNode;
 }
 
-export function CommandPalette(): ReactNode {
+export function CommandPalette({ previewTier = null }: { previewTier?: PackageTier | null }): ReactNode {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -151,15 +152,20 @@ export function CommandPalette(): ReactNode {
   if (!open) return null;
 
   const ql = q.trim().toLowerCase();
+  // Package preview: one href-based filter covers static commands AND record
+  // results (both carry hrefs) — fenced sections vanish from the palette.
+  const visible = COMMANDS.filter((c) => isPathIncluded(previewTier, c.href));
   const staticMatches: ReadonlyArray<Item> = ql
-    ? COMMANDS.filter((c) => `${c.label} ${c.keywords ?? ""}`.toLowerCase().includes(ql))
-    : COMMANDS;
-  const recordItems: Item[] = records.map((r) => ({
-    id: `rec:${r.type}:${r.id}`,
-    label: r.label,
-    href: r.href,
-    group: r.type,
-  }));
+    ? visible.filter((c) => `${c.label} ${c.keywords ?? ""}`.toLowerCase().includes(ql))
+    : visible;
+  const recordItems: Item[] = records
+    .filter((r) => isPathIncluded(previewTier, r.href))
+    .map((r) => ({
+      id: `rec:${r.type}:${r.id}`,
+      label: r.label,
+      href: r.href,
+      group: r.type,
+    }));
   const results: Item[] = [...staticMatches, ...recordItems];
   const active = Math.min(idx, Math.max(0, results.length - 1));
 

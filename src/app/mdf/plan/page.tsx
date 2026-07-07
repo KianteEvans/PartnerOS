@@ -19,6 +19,8 @@ import { loadPlans, availableMdf, loadActivityRecommendations } from "@/domain/m
 import { APPROVED_ACTIVITIES, INELIGIBLE_ACTIVITIES, type CatalogActivity } from "@/domain/mdf/activity-catalog";
 import type { ScoredActivity } from "@/domain/mdf/recommend-activities";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const SECTION = "var(--section-accent)";
 const labelStyle = { display: "grid", gap: 4, fontSize: 13 } as const;
@@ -47,6 +49,8 @@ export default async function MdfPlannerPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("mdf");
+  if (fenced) return <PackageFence feature="mdf" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const sp = await searchParams;

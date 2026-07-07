@@ -19,6 +19,8 @@ import { tierPath } from "@/domain/tiers/path";
 import { TIER_LABELS, type TierId } from "@/domain/tiers/catalog";
 import { PrintButton } from "@/app/plan/roadmaps/PrintButton";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * Clean, read-only print/PDF view of a leadership report. Print-isolation CSS hides
@@ -82,6 +84,8 @@ export default async function ReportPrintPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports");
+  if (fenced) return <PackageFence feature="reports" previewTier={fenced} />;
 
   const fetched = await withTenant(identity, async (tx) => {
     const [r] = await tx

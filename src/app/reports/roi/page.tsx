@@ -6,13 +6,17 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { BarChart } from "@/components/ui/BarChart";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { IconMdf, IconPortfolio, IconReports, IconTiers } from "@/components/ui/icons";
 import { can } from "@/authz/permissions";
 import { loadRoiLoop } from "@/domain/roi/load";
 import { sortSpend } from "@/domain/roi/loop";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * Program ROI (Wave 2 — full ROI loops). Answers "did our MDF/funding pay off?" by
@@ -26,6 +30,8 @@ const STATUS_TONE: Record<string, Tone> = { won: "ok", open: "info", lost: "dang
 export default async function ProgramRoiPage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports");
+  if (fenced) return <PackageFence feature="reports" previewTier={fenced} />;
   if (!can(identity.role, "report:read")) redirect("/");
 
   const { funnel: f, tierCredit } = await loadRoiLoop(identity);
@@ -57,26 +63,21 @@ export default async function ProgramRoiPage(): Promise<ReactNode> {
       ) : (
         <>
           {/* Funnel hero */}
-          <section
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: 12,
-            }}
-          >
-            <MetricCard label="Approved spend" value={money(f.approvedSpend)} sub="MDF + funding" />
-            <MetricCard label="Influenced pipeline" value={money(f.influencedOpen)} sub="open deals" tone="info" />
-            <MetricCard label="Won revenue" value={money(f.influencedWon)} sub="realized" tint="ok" tone="ok" />
-            <MetricCard label="Realized ROI" value={realized} sub={`expected ${expected}`} tone={roiTone} tint={roiTone === "neutral" ? undefined : roiTone} />
+          <MetricStrip>
+            <MetricCard label="Approved spend" value={money(f.approvedSpend)} sub="MDF + funding" icon={<IconMdf size={15} />} />
+            <MetricCard label="Influenced pipeline" value={money(f.influencedOpen)} sub="open deals" tone="info" icon={<IconPortfolio size={15} />} />
+            <MetricCard label="Won revenue" value={money(f.influencedWon)} sub="realized" tint="ok" tone="ok" icon={<IconMdf size={15} />} />
+            <MetricCard label="Realized ROI" value={realized} sub={`expected ${expected}`} tone={roiTone} tint={roiTone === "neutral" ? undefined : roiTone} icon={<IconReports size={15} />} size="lg" />
             {tierCredit ? (
               <MetricCard
                 label="Tier credit"
                 value={`${tierCredit.launched}/${tierCredit.threshold}`}
                 sub={`launched → ${tierCredit.targetTier}`}
                 tone="accent"
+                icon={<IconTiers size={15} />}
               />
             ) : null}
-          </section>
+          </MetricStrip>
 
           <Panel title="The loop" accent="accent">
             <BarChart

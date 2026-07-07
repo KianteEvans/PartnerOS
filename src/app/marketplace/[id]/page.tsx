@@ -43,6 +43,8 @@ import {
 } from "@/domain/marketplace/catalog";
 import { moneyFromCents as money } from "@/domain/format";
 import { formLabel as labelStyle, formControl as control } from "@/components/ui/form-styles";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const SEVERITY_COLOR: Record<FindingSeverity, string> = {
   ok: "var(--ok)",
@@ -58,6 +60,8 @@ export default async function ListingDetailPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const [listing, advisorData] = await Promise.all([
     loadListingDetail(identity, id),
     loadAttributionAdvisor(identity),

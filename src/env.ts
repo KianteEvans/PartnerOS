@@ -106,6 +106,23 @@ const base = z.object({
   // (/api/cron/aggregate-benchmarks). When unset/empty the endpoint is disabled;
   // it never blocks boot. Benchmarks still render in dev from seeded cohorts.
   BENCHMARK_AGGREGATOR_TOKEN: z.string().min(1).optional().or(z.literal("")),
+
+  // Optional. Bearer token gating the read-only BD-lead export feed
+  // (/api/integrations/bd-leads) that the standalone BDAgent app pulls inbound
+  // "Book a demo" leads from. Unset/empty => the endpoint returns 401.
+  BD_SYNC_TOKEN: z.string().min(1).optional().or(z.literal("")),
+
+  // Optional. Google OAuth credentials for the BD agent's Calendar scheduling.
+  // When any is unset/empty the calendar feature is disabled (never a boot
+  // failure), exactly like ANTHROPIC_API_KEY.
+  GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional().or(z.literal("")),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional().or(z.literal("")),
+  GOOGLE_OAUTH_REDIRECT_URI: z.string().url().optional().or(z.literal("")),
+  // Optional test seam: point these at the local google-calendar-stub in dev.
+  // Default to the real Google endpoints when unset.
+  GOOGLE_OAUTH_AUTH_URL: z.string().url().optional().or(z.literal("")),
+  GOOGLE_OAUTH_TOKEN_URL: z.string().url().optional().or(z.literal("")),
+  GOOGLE_API_BASE: z.string().url().optional().or(z.literal("")),
 });
 
 type Base = z.infer<typeof base>;

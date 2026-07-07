@@ -14,6 +14,8 @@ import { loadAgreementDetail, type AgreementChargeDetail } from "@/domain/market
 import { isActiveAgreement } from "@/domain/marketplace/billing";
 import { PRIVATE_OFFER_STATUS_LABELS } from "@/domain/marketplace/private-offers";
 import { moneyFromCents as money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 // Same status->tone mapping the Offers page uses.
 const offerTone = (s: string): "ok" | "info" | "danger" =>
@@ -30,6 +32,8 @@ export default async function AgreementDetailPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const { id } = await params;
   const today = new Date().toISOString().slice(0, 10);
 

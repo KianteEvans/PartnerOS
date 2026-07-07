@@ -4,13 +4,23 @@ import { revalidatePath } from "next/cache";
 import { runMutation } from "@/gate/mutation-gate";
 import { AppError } from "@/http/errors";
 import { parseOrThrow, type ActionState } from "@/domain/forms";
-import { createManagedWorkspaceSchema, requestLinkSchema, linkRequestSchema } from "./schemas";
+import {
+  createManagedWorkspaceSchema,
+  requestLinkSchema,
+  linkRequestSchema,
+  setCustomerPlanSchema,
+} from "./schemas";
 import {
   createManagedWorkspaceOp,
   requestLinkOp,
   approveLinkOp,
   rejectLinkOp,
+  setCustomerPlanOp,
 } from "./operations";
+import { PACKAGE_META, type PackageTier } from "@/domain/packaging/catalog";
+import { inviteEmail } from "@/domain/settings/invite-email";
+import { sendEmail } from "@/notifications/delivery";
+import { env } from "@/env";
 
 /**
  * Agency / portfolio server actions (Bet C). Validation + idempotency + Next plumbing;
@@ -30,24 +40,43 @@ export async function createManagedWorkspace(
   formData: FormData,
 ): Promise<ActionState> {
   let name = "";
+  let invited: { email: string; role: string }[] = [];
   try {
-    const input = parseOrThrow(createManagedWorkspaceSchema, { name: formData.get("name") });
+    const role = String(formData.get("inviteRole") ?? "member");
+    const emails = String(formData.get("inviteEmails") ?? "")
+      .split(/[\n,;]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    const input = parseOrThrow(createManagedWorkspaceSchema, {
+      name: formData.get("name"),
+      initialUsers: emails.map((email) => ({ email, role })),
+    });
     name = input.name;
-    await runMutation({
+    const res = await runMutation({
       permission: "portfolio:manage",
       idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
       rawBody: JSON.stringify(input),
       action: "portfolio.create_workspace",
       resourceType: "tenant",
       resourceId: (r: { tenantId: string }) => r.tenantId,
-      auditMetadata: { name: input.name },
+      auditMetadata: { name: input.name, invited: input.initialUsers.length },
       handler: (ctx) => createManagedWorkspaceOp(ctx, input),
     });
+    invited = res.body.invited;
   } catch (err) {
     return failure(err);
   }
+  // Committed; email delivery is best-effort on top (the adapter never throws).
+  // Invites are consumed by email match at first sign-in, so a failed send only
+  // means telling the invitee out-of-band.
+  const origin = new URL(env.OIDC_REDIRECT_URI).origin;
+  for (const u of invited) {
+    await sendEmail(inviteEmail({ email: u.email, role: u.role, origin }));
+  }
   revalidatePath("/portfolio");
-  return { ok: true, detail: `Created managed workspace "${name}".` };
+  const suffix =
+    invited.length > 0 ? ` and invited ${invited.length} teammate${invited.length === 1 ? "" : "s"}` : "";
+  return { ok: true, detail: `Created managed workspace "${name}"${suffix}.` };
 }
 
 export async function requestLink(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -108,4 +137,29 @@ export async function rejectLink(_prev: ActionState, formData: FormData): Promis
   }
   revalidatePath("/settings");
   return { ok: true, detail: "Link request declined." };
+}
+
+export async function setCustomerPlan(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  let plan: PackageTier | "" = "";
+  try {
+    const input = parseOrThrow(setCustomerPlanSchema, {
+      workspaceId: formData.get("workspaceId"),
+      plan: formData.get("plan"),
+    });
+    plan = input.plan;
+    await runMutation({
+      permission: "billing:set_plan",
+      idempotencyKey: String(formData.get("idempotencyKey") ?? ""),
+      rawBody: JSON.stringify(input),
+      action: "billing.set_plan",
+      resourceType: "tenant",
+      resourceId: () => input.workspaceId,
+      auditMetadata: { workspaceId: input.workspaceId, plan: input.plan },
+      handler: (ctx) => setCustomerPlanOp(ctx, input),
+    });
+  } catch (err) {
+    return failure(err);
+  }
+  revalidatePath("/portfolio");
+  return { ok: true, detail: `Service package set to ${PACKAGE_META[plan as PackageTier].label}.` };
 }

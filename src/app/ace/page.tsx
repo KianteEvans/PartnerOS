@@ -6,6 +6,8 @@ import { tryGetServerIdentity } from "@/auth/session";
 import { withTenant } from "@/db/client";
 import { opportunities, aceRelationships, aceInteractions, users, partnerCentralOpportunities, awsConnection, solutions, opportunityAwsTeam, programs, aceGoals, opportunityCaseStudies } from "@/db/schema";
 import { addDays } from "@/domain/dates";
+import { loadHubTrends } from "@/domain/command/trends-load";
+import { mkTrend } from "@/domain/trend";
 import { can } from "@/authz/permissions";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
@@ -19,6 +21,8 @@ import { RingGauge } from "@/components/ui/RingGauge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Card } from "@/components/ui/Card";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { IconPortfolio, IconTrophy, IconWarning, IconAce } from "@/components/ui/icons";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
 import { Pagination } from "@/components/ui/Pagination";
@@ -41,6 +45,8 @@ import {
 import { syncPartnerCentral, acceptPartnerCentralTruth, bulkAcceptPartnerCentralTruth } from "@/domain/aws/actions";
 import { SyncStatusStrip } from "@/components/ui/SyncStatusStrip";
 import { Callout } from "@/components/ui/Callout";
+import { isIncluded } from "@/domain/packaging/catalog";
+import { effectivePackageTier } from "@/domain/packaging/preview";
 import { connectorHealth, type ConnectorStatus } from "@/domain/settings/connectors";
 import { reconcileOpportunities, reconcileSummary, type ReconcileRow } from "@/domain/aws/reconcile";
 import {
@@ -146,13 +152,27 @@ export default async function AcePage({
   const canApprove = can(identity.role, "ace:approve");
   const canUpdate = can(identity.role, "ace:update");
 
+  // Package preview: the ACE records layer is open in every tier; the management
+  // machinery (analytics, saved views, priority scoring, bulk ops), the Sales-Org
+  // and Insights tabs, and the Deal Desk are Growth+.
+  const preview = await effectivePackageTier();
+  const aceManagement = isIncluded(preview, "ace_management");
+  const aceReps = isIncluded(preview, "ace_reps");
+  const aceInsights = isIncluded(preview, "ace_insights");
+  const dealDesk = isIncluded(preview, "deal_desk");
+  const visibleTabs = TABS.filter(
+    (t) => (t.key !== "reps" || aceReps) && (t.key !== "insights" || aceInsights),
+  );
+
   const sp = await searchParams;
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const viewParam = Array.isArray(sp.view) ? sp.view[0] : sp.view;
-  const tab: Tab =
+  const requestedTab =
     tabParam === "relationships" || tabParam === "reps" || tabParam === "reconcile" || tabParam === "insights"
       ? tabParam
       : "opportunities";
+  // A fenced tab (reps/insights under a lower package) falls back to Pipeline.
+  const tab: Tab = visibleTabs.some((t) => t.key === requestedTab) ? requestedTab : "opportunities";
   const view: OppView = isOppView(viewParam) ? viewParam : "all";
   const list = parseListParams(sp, {
     sortable: ["created", "name", "stage", "value", "priority"],
@@ -256,6 +276,7 @@ export default async function AcePage({
   const wr = winRate(opps as OppLike[]);
   const funnel = stageFunnel(opps as OppLike[]);
   const coolingReps = repRoll.filter((r) => r.atRisk).length;
+  const trends = await loadHubTrends(identity);
 
   // Co-Selling Goals: measure each active goal against the rows already loaded,
   // then materialize today's snapshot (best-effort) to feed the trend sparkline.
@@ -370,15 +391,15 @@ export default async function AcePage({
       />
 
       {/* Persistent command strip — one orientation surface across every tab. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-        <MetricCard label="Open pipeline" value={money(summary.openValue)} sub={`${summary.open} open ${summary.open === 1 ? "deal" : "deals"}`} tone="accent" />
-        <MetricCard label="Win rate" value={wr === null ? "—" : `${wr}%`} sub={`${summary.won} won · ${money(summary.wonValue)}`} tone="ok" />
-        <MetricCard label="Pipeline at risk" value={money(atRiskValue)} sub={`${summary.atRisk} ${summary.atRisk === 1 ? "deal" : "deals"}`} tone={atRiskValue > 0 ? "warn" : "neutral"} />
-        <MetricCard label="Cooling AWS reps" value={String(coolingReps)} sub="open pipeline going cold" tone={coolingReps > 0 ? "warn" : "neutral"} />
-        <MetricCard label="Coverage gaps" value={String(gaps.length)} sub="missing Sales Rep / PSM" tone={gaps.length > 0 ? "warn" : "neutral"} />
-      </div>
+      <MetricStrip min={160}>
+        <MetricCard label="Open pipeline" href="/ace" icon={<IconPortfolio size={15} />} size="lg" value={money(summary.openValue)} sub={`${summary.open} open ${summary.open === 1 ? "deal" : "deals"}`} tone="accent" />
+        <MetricCard label="Win rate" icon={<IconTrophy size={15} />} collapsible={false} value={wr === null ? "—" : `${wr}%`} sub={`${summary.won} won · ${money(summary.wonValue)}`} tone="ok" trend={mkTrend(trends.winRate, { suffix: "%" })} />
+        <MetricCard label="Pipeline at risk" href="/ace?view=at_risk" icon={<IconWarning size={15} />} value={money(atRiskValue)} sub={`${summary.atRisk} ${summary.atRisk === 1 ? "deal" : "deals"}`} tone={atRiskValue > 0 ? "warn" : "neutral"} />
+        <MetricCard label="Cooling AWS reps" icon={<IconAce size={15} />} collapsible={false} value={String(coolingReps)} sub="open pipeline going cold" tone={coolingReps > 0 ? "warn" : "neutral"} />
+        <MetricCard label="Coverage gaps" icon={<IconWarning size={15} />} collapsible={false} value={String(gaps.length)} sub="missing Sales Rep / PSM" tone={gaps.length > 0 ? "warn" : "neutral"} />
+      </MetricStrip>
 
-      {attention.length > 0 && (
+      {aceManagement && attention.length > 0 && (
         <Panel title="Needs attention">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
             {attention.map((a) => (
@@ -402,16 +423,23 @@ export default async function AcePage({
       />
 
       <SegmentedControl
-        options={TABS.map((t) => ({ value: t.key, label: t.label }))}
+        options={visibleTabs.map((t) => ({ value: t.key, label: t.label }))}
         value={tab}
         hrefFor={(k) => `/ace?tab=${k}`}
       />
 
       {tab === "opportunities" && (
         <>
-          <PipelineSummaryPanel summary={summary} funnel={funnel} winRate={wr} />
+          {aceManagement ? (
+            <PipelineSummaryPanel summary={summary} funnel={funnel} winRate={wr} />
+          ) : (
+            <Callout tone="info" title="Pipeline analytics are part of Growth">
+              Stage funnel, win-rate, saved views, priority scoring, and bulk actions unlock in the Growth
+              package. Your opportunity and relationship records stay fully open here.
+            </Callout>
+          )}
           <SyncedPartnerCentral synced={synced} connection={awsConn} nowMs={nowMs} today={today} drift={reconSummary.drift} />
-          <Opportunities opps={opps} rels={rels} view={view} today={today} members={members} emailById={emailById} canApprove={canApprove} list={list} sols={sols} progs={progs} proofCounts={new Map(proofRows.map((r) => [r.opportunityId, Number(r.n)]))} />
+          <Opportunities opps={opps} rels={rels} view={view} today={today} members={members} emailById={emailById} canApprove={canApprove} list={list} sols={sols} progs={progs} proofCounts={new Map(proofRows.map((r) => [r.opportunityId, Number(r.n)]))} aceManagement={aceManagement} dealDesk={dealDesk} />
         </>
       )}
       {tab === "relationships" && <Relationships rels={rels} opps={opps} cadence={cadenceByContact} interactions={interactions} today={today} list={list} />}
@@ -825,6 +853,8 @@ function Opportunities({
   sols,
   progs,
   proofCounts,
+  aceManagement,
+  dealDesk,
 }: {
   opps: (typeof opportunities.$inferSelect)[];
   rels: (typeof aceRelationships.$inferSelect)[];
@@ -837,6 +867,8 @@ function Opportunities({
   sols: ReadonlyArray<{ id: string; title: string }>;
   progs: ReadonlyArray<{ id: string; name: string }>;
   proofCounts: Map<string, number>;
+  aceManagement: boolean;
+  dealDesk: boolean;
 }): ReactNode {
   const relNameById = new Map(rels.map((r) => [r.id, r.name]));
   const counts = viewCounts(opps as OppLike[], { today });
@@ -859,25 +891,31 @@ function Opportunities({
   return (
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <nav aria-label="Pipeline views" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <SegmentedControl
-            options={OPP_VIEWS.map((v) => ({ value: v, label: `${OPP_VIEW_LABELS[v]} (${counts[v]})` }))}
-            value={view}
-            hrefFor={(v) => listHref("/ace", { tab: "opportunities", view: v, q: list.q })}
-          />
-        </nav>
+        {aceManagement ? (
+          <nav aria-label="Pipeline views" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <SegmentedControl
+              options={OPP_VIEWS.map((v) => ({ value: v, label: `${OPP_VIEW_LABELS[v]} (${counts[v]})` }))}
+              value={view}
+              hrefFor={(v) => listHref("/ace", { tab: "opportunities", view: v, q: list.q })}
+            />
+          </nav>
+        ) : (
+          <span />
+        )}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <SegmentedControl
-            options={[...OPP_SORTS]}
-            value={list.sort}
-            hrefFor={(s) => listHref("/ace", { tab: "opportunities", view, q: list.q, sort: s, dir: OPP_SORT_DIR[s] })}
-            size="sm"
-          />
+          {aceManagement && (
+            <SegmentedControl
+              options={[...OPP_SORTS]}
+              value={list.sort}
+              hrefFor={(s) => listHref("/ace", { tab: "opportunities", view, q: list.q, sort: s, dir: OPP_SORT_DIR[s] })}
+              size="sm"
+            />
+          )}
           <SearchForm q={list.q} placeholder="Search by name…" hidden={{ tab: "opportunities", view, sort: list.sort, dir: list.dir }} />
         </div>
       </div>
 
-      <SavedViewsBar listKey="ace:opportunities" current={{ tab: "opportunities", view, q: list.q }} />
+      {aceManagement && <SavedViewsBar listKey="ace:opportunities" current={{ tab: "opportunities", view, q: list.q }} />}
 
       {paged.length === 0 ? (
         <Panel>
@@ -904,7 +942,7 @@ function Opportunities({
             const issues = hygieneIssues(o as OppLike, today);
             return (
               <div key={o.id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                <BulkCheckbox id={o.id} />
+                {aceManagement && <BulkCheckbox id={o.id} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
               <Card id={`opp-${o.id}`}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -1025,24 +1063,28 @@ function Opportunities({
                   ) : (
                     <span style={{ color: "var(--muted)", fontSize: 12 }}>Assign an owner to route</span>
                   )}
-                  <Link
-                    href={`/ace/${o.id}`}
-                    style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--section-accent)", textDecoration: "none" }}
-                  >
-                    Deal desk →
-                  </Link>
-                  <Link
-                    href={`/funding/eligibility?opp=${o.id}`}
-                    style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}
-                  >
-                    Funding options →
-                  </Link>
-                  {(proofCounts.get(o.id) ?? 0) > 0 && (
-                    <Link href={`/ace/${o.id}#case-studies`} style={{ textDecoration: "none" }}>
-                      <Badge tone="ok">
-                        {proofCounts.get(o.id)} proof point{proofCounts.get(o.id) === 1 ? "" : "s"}
-                      </Badge>
-                    </Link>
+                  {dealDesk && (
+                    <>
+                      <Link
+                        href={`/ace/${o.id}`}
+                        style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--section-accent)", textDecoration: "none" }}
+                      >
+                        Deal desk →
+                      </Link>
+                      <Link
+                        href={`/funding/eligibility?opp=${o.id}`}
+                        style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", textDecoration: "none" }}
+                      >
+                        Funding options →
+                      </Link>
+                      {(proofCounts.get(o.id) ?? 0) > 0 && (
+                        <Link href={`/ace/${o.id}#case-studies`} style={{ textDecoration: "none" }}>
+                          <Badge tone="ok">
+                            {proofCounts.get(o.id)} proof point{proofCounts.get(o.id) === 1 ? "" : "s"}
+                          </Badge>
+                        </Link>
+                      )}
+                    </>
                   )}
                 </div>
               </Card>
@@ -1051,14 +1093,16 @@ function Opportunities({
             );
           })}
         </div>
-        <BulkBar>
-          <BulkActionForm
-            action={bulkUpdateOpportunity}
-            field="ownerUserId"
-            options={members.map((m) => ({ value: m.id, label: m.email }))}
-            submitLabel="Reassign owner"
-          />
-        </BulkBar>
+        {aceManagement && (
+          <BulkBar>
+            <BulkActionForm
+              action={bulkUpdateOpportunity}
+              field="ownerUserId"
+              options={members.map((m) => ({ value: m.id, label: m.email }))}
+              submitLabel="Reassign owner"
+            />
+          </BulkBar>
+        )}
         </BulkProvider>
       )}
 

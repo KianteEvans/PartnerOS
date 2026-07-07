@@ -6,6 +6,8 @@ import { withTenant } from "@/db/client";
 import { auditLog, users } from "@/db/schema";
 import { AppError } from "@/http/errors";
 import { AUDIT_EXPORT_CAP, auditWhere, parseAuditFilters } from "@/domain/audit/query";
+import { collectOperatorRefs, operatorRefFromMetadata } from "@/domain/audit/attribution";
+import { loadAttribution } from "@/domain/audit/attribution-load";
 
 /**
  * Audit log CSV export. Read-only, tenant-scoped via RLS, gated on audit:read,
@@ -29,6 +31,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           action: auditLog.action,
           resourceType: auditLog.resourceType,
           resourceId: auditLog.resourceId,
+          metadata: auditLog.metadata,
         })
         .from(auditLog)
         .where(where)
@@ -41,8 +44,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       return { rows, emailById: new Map(members.map((m) => [m.id, m.email])) };
     });
 
-    const lines: string[] = ["timestamp_utc,actor,action,resource_type,resource_id"];
+    // Resolve agency act-as attribution (cross-tenant) so the CSV records which
+    // agency operator acted, not just the synthetic service user.
+    const attribution = await loadAttribution(collectOperatorRefs(rows.map((r) => r.metadata)));
+    const lines: string[] = [
+      "timestamp_utc,actor,action,resource_type,resource_id,operator,agency",
+    ];
     for (const r of rows) {
+      const ref = operatorRefFromMetadata(r.metadata);
       lines.push(
         [
           r.createdAt.toISOString(),
@@ -50,6 +59,8 @@ export async function GET(request: NextRequest): Promise<Response> {
           r.action,
           r.resourceType,
           r.resourceId ?? "",
+          ref ? attribution.operatorEmailById.get(ref.operatorId) ?? "" : "",
+          ref ? attribution.agencyNameById.get(ref.agencyId) ?? "" : "",
         ]
           .map(cell)
           .join(","),

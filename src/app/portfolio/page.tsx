@@ -12,7 +12,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { loadPortfolio } from "@/domain/portfolio/load";
 import { sortWorkspaces, type PortfolioSortKey } from "@/domain/portfolio/rollup";
-import { createManagedWorkspace, requestLink } from "@/domain/portfolio/actions";
+import { createManagedWorkspace, requestLink, setCustomerPlan } from "@/domain/portfolio/actions";
+import { PACKAGE_META, type PackageTier } from "@/domain/packaging/catalog";
+import { can } from "@/authz/permissions";
 import { money } from "@/domain/format";
 
 const BAND_TONE: Record<string, Tone> = { strong: "ok", fair: "warn", at_risk: "danger" };
@@ -21,6 +23,8 @@ const BAND_COLOR: Record<string, string> = {
   fair: "var(--warn)",
   at_risk: "var(--danger)",
 };
+// Service package -> pill tone (Essentials = quiet, Enterprise = brand accent).
+const PLAN_TONE: Record<string, Tone> = { essentials: "neutral", growth: "info", enterprise: "accent" };
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -57,6 +61,8 @@ export default async function PortfolioPage({
     : "health";
   const workspaces = sortWorkspaces(view.workspaces, sort);
   const r = view.rollup;
+  // Only owners/admins can change a customer's package; managers see it read-only.
+  const canSetPlan = can(identity.role, "billing:set_plan");
 
   const drawers = (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -73,6 +79,24 @@ export default async function PortfolioPage({
         <label style={labelStyle}>
           <span style={spanStyle}>Workspace name</span>
           <input name="name" maxLength={120} required style={controlStyle} placeholder="Globex Cloud" />
+        </label>
+        <label style={labelStyle}>
+          <span style={spanStyle}>Invite their team (optional) — one email per line</span>
+          <textarea
+            name="inviteEmails"
+            rows={3}
+            style={{ ...controlStyle, resize: "vertical", fontFamily: "inherit" }}
+            placeholder={"lead@newsecurity.com\nops@newsecurity.com"}
+          />
+        </label>
+        <label style={labelStyle}>
+          <span style={spanStyle}>Their role</span>
+          <select name="inviteRole" defaultValue="member" style={controlStyle}>
+            <option value="admin">Admin</option>
+            <option value="manager">Manager</option>
+            <option value="member">Member</option>
+            <option value="viewer">Viewer</option>
+          </select>
         </label>
       </FormDrawer>
       <FormDrawer
@@ -193,6 +217,7 @@ export default async function PortfolioPage({
               <thead>
                 <tr style={{ textAlign: "left", color: "var(--muted)", fontSize: 12 }}>
                   <th style={{ padding: "6px 10px" }}>Workspace</th>
+                  <th style={{ padding: "6px 10px" }}>Package</th>
                   <th style={{ padding: "6px 10px" }}>Health</th>
                   <th style={{ padding: "6px 10px" }}>Work</th>
                   <th style={{ padding: "6px 10px" }}>Pipeline</th>
@@ -209,6 +234,37 @@ export default async function PortfolioPage({
                       </Link>
                       <div style={{ marginTop: 3 }}>
                         <Badge tone={statusTone(w.tier)}>{w.tier}</Badge>
+                      </div>
+                    </td>
+                    <td style={{ padding: "9px 10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Badge tone={PLAN_TONE[w.plan] ?? "neutral"}>
+                          {PACKAGE_META[w.plan as PackageTier]?.label ?? w.plan}
+                        </Badge>
+                        {canSetPlan ? (
+                          <FormDrawer
+                            triggerLabel="Change"
+                            triggerVariant="secondary"
+                            title={`Service package — ${w.name}`}
+                            action={setCustomerPlan}
+                            submitLabel="Save package"
+                            successMessage="Package updated."
+                            hidden={{ workspaceId: w.id }}
+                          >
+                            <p style={{ ...spanStyle, fontSize: 13, marginTop: 0 }}>
+                              Scope what {w.name} can access. Deliverables above their package show as an
+                              upgrade path, not an error.
+                            </p>
+                            <label style={labelStyle}>
+                              <span style={spanStyle}>Package</span>
+                              <select name="plan" defaultValue={w.plan} style={controlStyle}>
+                                <option value="essentials">Essentials — Establish</option>
+                                <option value="growth">Growth — Scale</option>
+                                <option value="enterprise">Enterprise — Operate</option>
+                              </select>
+                            </label>
+                          </FormDrawer>
+                        ) : null}
                       </div>
                     </td>
                     <td style={{ padding: "9px 10px" }}>

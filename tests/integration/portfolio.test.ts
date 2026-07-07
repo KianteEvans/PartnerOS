@@ -160,3 +160,56 @@ describe("link consent", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("invite-on-create (agency onboarding)", () => {
+  it("seeds de-duplicated pending invitations for the new customer workspace", async () => {
+    const { withSystem } = db.client;
+    const { invitations, users } = db.schema;
+    const res = await ops.createManagedWorkspaceOp({ identity: id(A, ownerA) } as never, {
+      name: "New Security Inc",
+      initialUsers: [
+        { email: "lead@newsec.test", role: "admin" },
+        { email: "LEAD@newsec.test", role: "member" }, // same email (case) -> collapsed
+        { email: "ops@newsec.test", role: "viewer" },
+      ],
+    });
+    expect(res.invited).toHaveLength(2);
+
+    const rows = await withSystem((tx) =>
+      tx
+        .select({
+          email: invitations.email,
+          role: invitations.role,
+          status: invitations.status,
+          invitedBy: invitations.invitedByUserId,
+        })
+        .from(invitations)
+        .where(eq(invitations.tenantId, res.tenantId)),
+    );
+    expect(rows).toHaveLength(2);
+    const byEmail = new Map(rows.map((r) => [r.email, r]));
+    expect(byEmail.get("lead@newsec.test")?.status).toBe("pending");
+    expect(byEmail.get("ops@newsec.test")?.role).toBe("viewer");
+    // "Invited by" is the agency service user provisioned in the CHILD workspace.
+    const svc = await withSystem((tx) =>
+      tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.tenantId, res.tenantId), eq(users.oidcSubject, `agency:${A}`))),
+    );
+    expect(svc).toHaveLength(1);
+    expect(byEmail.get("lead@newsec.test")?.invitedBy).toBe(svc[0]!.id);
+  });
+
+  it("creates no invitations when none are provided", async () => {
+    const { withSystem } = db.client;
+    const { invitations } = db.schema;
+    const res = await ops.createManagedWorkspaceOp({ identity: id(A, ownerA) } as never, {
+      name: "Empty Co",
+    });
+    const rows = await withSystem((tx) =>
+      tx.select({ id: invitations.id }).from(invitations).where(eq(invitations.tenantId, res.tenantId)),
+    );
+    expect(rows).toHaveLength(0);
+  });
+});

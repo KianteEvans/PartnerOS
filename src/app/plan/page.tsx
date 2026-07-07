@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
 import { Pagination } from "@/components/ui/Pagination";
-import { IconAssessments } from "@/components/ui/icons";
+import { IconAssessments, IconTasks, IconReports, IconApplications } from "@/components/ui/icons";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { AskAws } from "@/components/ui/AskAws";
 import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
@@ -133,10 +133,10 @@ export default async function AssessmentsPage({
 
       {stats.total > 0 && (
         <MetricStrip>
-          <MetricCard label="Assessments" value={String(stats.total)} sub="total" />
-          <MetricCard label="Scored" value={String(stats.scored)} tone="ok" sub="completed" />
-          <MetricCard label="Avg score" value={stats.avg == null ? "—" : String(stats.avg)} tone="info" sub="across scored" />
-          <MetricCard label="Drafts" value={String(stats.drafts)} sub="in progress" />
+          <MetricCard label="Assessments" value={String(stats.total)} sub="total" icon={<IconAssessments size={15} />} />
+          <MetricCard label="Scored" value={String(stats.scored)} tone="ok" sub="completed" icon={<IconTasks size={15} />} />
+          <MetricCard label="Avg score" value={stats.avg == null ? "—" : String(stats.avg)} tone="info" sub="across scored" icon={<IconReports size={15} />} size="lg" />
+          <MetricCard label="Drafts" value={String(stats.drafts)} sub="in progress" icon={<IconApplications size={15} />} />
         </MetricStrip>
       )}
 

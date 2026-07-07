@@ -22,6 +22,8 @@ import { inView, FUNDING_VIEWS, FUNDING_VIEW_LABELS, viewCounts, type FundingVie
 import { FUNDING_STATUS_LABELS, type FundingSubmissionStatus } from "@/domain/funding/lifecycle";
 import { getFundingProgram } from "@/domain/funding/catalog";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const STATUS_TONE: Record<FundingSubmissionStatus, "neutral" | "info" | "ok" | "danger"> = {
@@ -43,6 +45,8 @@ export default async function FundingSubmissionsPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("funding");
+  if (fenced) return <PackageFence feature="funding" previewTier={fenced} />;
   const sp = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
 

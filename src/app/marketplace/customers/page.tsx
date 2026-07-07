@@ -16,6 +16,8 @@ import { type CustomerRollup } from "@/domain/marketplace/customers";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { tableView } from "@/domain/marketplace/table-view";
 import { moneyFromCents } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const money = (cents: number): string => moneyFromCents(cents, 0);
 
@@ -37,6 +39,8 @@ export default async function CustomersPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
   const params = parseListParams(await searchParams, { sortable: [...CUSTOMER_SORT_KEYS], defaultSort: "tcv" });
 

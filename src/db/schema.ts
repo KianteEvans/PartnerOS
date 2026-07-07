@@ -29,6 +29,15 @@ export const partnerTier = pgEnum("partner_tier", [
   "premier",
 ]);
 
+// Service-package entitlement (PartnerOS packaging: Establish/Scale/Operate).
+// NOT the AWS partner tier above. Persisted per workspace in tenants.plan and
+// enforced via src/domain/packaging (packageFenceFor + PackageFence).
+export const packageTier = pgEnum("package_tier", [
+  "essentials",
+  "growth",
+  "enterprise",
+]);
+
 export const userRole = pgEnum("user_role", [
   "owner",
   "admin",
@@ -59,6 +68,10 @@ export const tenants = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     tier: partnerTier("tier").notNull().default("registered"),
+    // Service-package entitlement (drizzle/0059). Default 'enterprise' keeps
+    // every existing workspace fully unlocked; agency-provisioned customer
+    // workspaces are created at 'essentials'. Read/written via withSystem.
+    plan: packageTier("plan").notNull().default("enterprise"),
     // Agency / portfolio mode (drizzle/0048). is_agency marks a parent agency; a
     // managed workspace points at its agency via agency_id (self-referential FK).
     // Application code enforces is_agency XOR agency_id (no nested agencies).

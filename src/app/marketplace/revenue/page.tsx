@@ -30,6 +30,8 @@ import { isAttributionAdvisorEnabled } from "@/domain/marketplace/attribution-ai
 import { AttributionAdvisor } from "@/app/marketplace/revenue/AttributionAdvisor";
 import { moneyFromCents } from "@/domain/format";
 import { formLabel as labelStyle, formControl as control } from "@/components/ui/form-styles";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const money = (cents: number): string => moneyFromCents(cents, 0);
 
@@ -43,6 +45,8 @@ const MAX_SHOWN_FINDINGS = 6;
 export default async function RevenuePage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const [data, trends, advisorData] = await Promise.all([

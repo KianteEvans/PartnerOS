@@ -21,6 +21,13 @@
       "runtimeArgs": ["--prefix", "C:\\Users\\Luis\\BarberBook", "run", "dev"],
       "port": 3002,
       "autoPort": false
+    },
+    {
+      "name": "bdagent",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\Luis\\Downloads\\BDAgent", "run", "dev"],
+      "port": 3004,
+      "autoPort": false
     }
   ]
 }

@@ -41,6 +41,8 @@ import { itemRoi, recommendedFit, type FitItem, type PlanFit } from "@/domain/md
 import { PlanTimeline } from "@/app/mdf/plan/[id]/PlanTimeline";
 import { PlanViews } from "@/app/mdf/plan/[id]/PlanViews";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const SECTION = "var(--section-accent)";
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
@@ -85,6 +87,8 @@ export default async function MdfPlanDetailPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("mdf");
+  if (fenced) return <PackageFence feature="mdf" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const [detail, avail] = await Promise.all([loadPlanDetail(identity, id), availableMdf(identity, today)]);

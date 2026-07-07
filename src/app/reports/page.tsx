@@ -10,6 +10,7 @@ import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Table } from "@/components/ui/Table";
 import { Card } from "@/components/ui/Card";
+import { IconReports, IconTasks, IconEvidence, IconApplications } from "@/components/ui/icons";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
@@ -25,6 +26,8 @@ import {
   type ReportType,
   type ReportStatus,
 } from "@/domain/reports/metrics";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const REPORT_SORT = {
   created: reports.createdAt,
@@ -49,6 +52,8 @@ export default async function ReportsPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports");
+  if (fenced) return <PackageFence feature="reports" previewTier={fenced} />;
 
   const params = parseListParams(await searchParams, {
     sortable: ["created", "title", "status"],
@@ -139,10 +144,10 @@ export default async function ReportsPage({
 
       {stats.total > 0 && (
         <MetricStrip>
-          <MetricCard label="Reports" value={String(stats.total)} sub="generated" />
-          <MetricCard label="Approved" value={String(stats.approved)} tone="ok" sub="signed off" />
-          <MetricCard label="Exported" value={String(stats.exported)} tone="info" sub="shared" />
-          <MetricCard label="Drafts" value={String(stats.drafts)} sub="in progress" />
+          <MetricCard label="Reports" value={String(stats.total)} sub="generated" icon={<IconReports size={15} />} />
+          <MetricCard label="Approved" value={String(stats.approved)} tone="ok" sub="signed off" icon={<IconTasks size={15} />} />
+          <MetricCard label="Exported" value={String(stats.exported)} tone="info" sub="shared" icon={<IconEvidence size={15} />} />
+          <MetricCard label="Drafts" value={String(stats.drafts)} sub="in progress" icon={<IconApplications size={15} />} />
         </MetricStrip>
       )}
 

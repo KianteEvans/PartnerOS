@@ -27,6 +27,8 @@ import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { tableView } from "@/domain/marketplace/table-view";
 import { moneyFromCents as money } from "@/domain/format";
 import { formLabel as labelStyle, formControl as control } from "@/components/ui/form-styles";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const METERING_SORT_KEYS = ["when", "listing", "dimension", "customer", "quantity", "status"] as const;
@@ -46,6 +48,8 @@ export default async function MeteringPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
 
   const today = new Date().toISOString().slice(0, 10);
   const params = parseListParams(await searchParams, { sortable: [...METERING_SORT_KEYS], defaultSort: "when" });

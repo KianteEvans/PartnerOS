@@ -6,11 +6,15 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { BarChart } from "@/components/ui/BarChart";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { can } from "@/authz/permissions";
 import { loadWinLoss } from "@/domain/ace/winloss-load";
+import { loadHubTrends } from "@/domain/command/trends-load";
+import { mkTrend } from "@/domain/trend";
+import { IconReports, IconTrophy, IconMdf, IconWarning, IconClock } from "@/components/ui/icons";
 import { cycleDays, LOSS_REASON_LABELS, STRONG_STRENGTH, type LossReason } from "@/domain/ace/winloss";
 import { SOURCE_LABELS, STAGE_LABELS } from "@/domain/ace/opportunities";
 import { isWinLossAiEnabled } from "@/domain/ace/winloss-ai";
@@ -18,6 +22,8 @@ import { WinLossNarrative } from "./WinLossNarrative";
 import { money } from "@/domain/format";
 import { Pagination } from "@/components/ui/Pagination";
 import { pageCount } from "@/domain/list";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * Win/loss mining (Wave 2 finale). Learns from CLOSED deals: win rate by cohort,
@@ -39,11 +45,14 @@ export default async function WinLossPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports");
+  if (fenced) return <PackageFence feature="reports" previewTier={fenced} />;
   if (!can(identity.role, "report:read")) redirect("/");
 
   const sp = await searchParams;
   const pageRaw = Number(Array.isArray(sp.page) ? sp.page[0] : sp.page);
   const { report: r, deals, reps, strength } = await loadWinLoss(identity);
+  const trends = await loadHubTrends(identity);
   const o = r.overall;
   const trusted = r.factors.filter((f) => !f.suppressed && f.lift !== null).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0));
   // Mining always uses every closed deal; only the table display pages.
@@ -66,13 +75,13 @@ export default async function WinLossPage({
         />
       ) : (
         <>
-          <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-            <MetricCard label="Closed deals" value={String(o.closed)} sub={`${o.won} won · ${o.lost} lost`} />
-            <MetricCard label="Win rate" value={pct(o.winRate)} sub="of closed" tone={winTone(o.winRate)} tint={winTone(o.winRate) === "neutral" ? undefined : winTone(o.winRate)} />
-            <MetricCard label="Won revenue" value={money(o.wonTCV)} sub="realized" tone="ok" />
-            <MetricCard label="Lost revenue" value={money(o.lostTCV)} sub="walked away" tone={o.lostTCV > 0 ? "danger" : "neutral"} />
-            <MetricCard label="Avg cycle" value={o.avgCycleDays == null ? "—" : `${o.avgCycleDays}d`} sub="created → won" />
-          </section>
+          <MetricStrip>
+            <MetricCard label="Closed deals" icon={<IconReports size={15} />} value={String(o.closed)} sub={`${o.won} won · ${o.lost} lost`} />
+            <MetricCard label="Win rate" icon={<IconTrophy size={15} />} size="lg" value={pct(o.winRate)} sub="of closed" tone={winTone(o.winRate)} tint={winTone(o.winRate) === "neutral" ? undefined : winTone(o.winRate)} trend={mkTrend(trends.winRate, { suffix: "%" })} />
+            <MetricCard label="Won revenue" icon={<IconMdf size={15} />} value={money(o.wonTCV)} sub="realized" tone="ok" />
+            <MetricCard label="Lost revenue" icon={<IconWarning size={15} />} value={money(o.lostTCV)} sub="walked away" tone={o.lostTCV > 0 ? "danger" : "neutral"} />
+            <MetricCard label="Avg cycle" icon={<IconClock size={15} />} value={o.avgCycleDays == null ? "—" : `${o.avgCycleDays}d`} sub="created → won" />
+          </MetricStrip>
 
           <Panel title="Explain" actions={null}>
             <WinLossNarrative enabled={isWinLossAiEnabled()} />

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Brand } from "@/components/ui/Brand";
 import { TOGGLE_NAV_EVENT } from "@/components/ui/TopBar";
+import { isPathIncluded, type PackageTier } from "@/domain/packaging/catalog";
 import {
   IconHome,
   IconCommand,
@@ -83,17 +84,37 @@ const NAV_GROUPS: ReadonlyArray<{ label: string; items: readonly NavItem[] }> = 
 const STORAGE_KEY = "partneros:sidebar";
 const MOBILE_BREAKPOINT = 760;
 
-/** Agencies get an extra "Portfolio" item in the Overview group (Bet C). */
-function navGroups(isAgency: boolean): ReadonlyArray<{ label: string; items: readonly NavItem[] }> {
-  if (!isAgency) return NAV_GROUPS;
-  return NAV_GROUPS.map((g) =>
-    g.label === "Overview"
-      ? { ...g, items: [...g.items, { href: "/portfolio", label: "Portfolio", Icon: IconPortfolio }] }
-      : g,
-  );
+/**
+ * Agencies get an extra "Portfolio" item in the Overview group (Bet C). A
+ * package preview hides sections outside the simulated tier (empty groups
+ * disappear too, so an Essentials nav reads as the real Essentials product).
+ */
+function navGroups(
+  isAgency: boolean,
+  previewTier: PackageTier | null,
+): ReadonlyArray<{ label: string; items: readonly NavItem[] }> {
+  const base = !isAgency
+    ? NAV_GROUPS
+    : NAV_GROUPS.map((g) =>
+        g.label === "Overview"
+          ? { ...g, items: [...g.items, { href: "/portfolio", label: "Portfolio", Icon: IconPortfolio }] }
+          : g,
+      );
+  if (previewTier === null) return base;
+  return base
+    .map((g) => ({ ...g, items: g.items.filter((i) => isPathIncluded(previewTier, i.href)) }))
+    .filter((g) => g.items.length > 0);
 }
 
-export function Sidebar({ email, isAgency = false }: { email: string; isAgency?: boolean }): ReactNode {
+export function Sidebar({
+  email,
+  isAgency = false,
+  previewTier = null,
+}: {
+  email: string;
+  isAgency?: boolean;
+  previewTier?: PackageTier | null;
+}): ReactNode {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -218,7 +239,7 @@ export function Sidebar({ email, isAgency = false }: { email: string; isAgency?:
             alignContent: "start",
           }}
         >
-          {navGroups(isAgency).map((group, gi) => (
+          {navGroups(isAgency, previewTier).map((group, gi) => (
             <div key={group.label} style={{ display: "grid", gap: 2 }}>
               {railCollapsed ? (
                 gi > 0 ? (

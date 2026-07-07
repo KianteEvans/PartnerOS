@@ -14,6 +14,8 @@ import { can } from "@/authz/permissions";
 import { loadForecasts, REVENUE_HORIZON_DAYS, METRIC_HORIZON_DAYS, type SeriesForecast } from "@/domain/forecast/load";
 import { MIN_POINTS } from "@/domain/forecast/project";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * Forecasts (Wave 3). The forward view over the app's accumulated snapshot history:
@@ -68,6 +70,8 @@ function ProjectionPanel({
 export default async function ForecastsPage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports_forecasts");
+  if (fenced) return <PackageFence feature="reports_forecasts" previewTier={fenced} />;
   if (!can(identity.role, "report:read")) redirect("/");
 
   const v = await loadForecasts(identity);

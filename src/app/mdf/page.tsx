@@ -14,6 +14,7 @@ import { Badge, statusTone } from "@/components/ui/Badge";
 import { BarChart } from "@/components/ui/BarChart";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { IconMdf, IconClock, IconPortfolio, IconReports, IconTasks, IconWarning } from "@/components/ui/icons";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { Callout } from "@/components/ui/Callout";
 import { DeltaChip } from "@/components/ui/DeltaChip";
@@ -59,6 +60,8 @@ import { trendDelta } from "@/domain/trend";
 import { addDays } from "@/domain/dates";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { moneyOrDash as money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const SECTION = "var(--section-accent)";
 
@@ -114,6 +117,8 @@ export default async function MdfPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("mdf");
+  if (fenced) return <PackageFence feature="mdf" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
 
   const sp = await searchParams;
@@ -324,11 +329,12 @@ export default async function MdfPage({
         </div>
         <div style={{ flex: 1, minWidth: 260 }}>
           <MetricStrip min={130}>
-            <MetricCard label="Approved" value={money(summary.approved)} />
+            <MetricCard label="Approved" value={money(summary.approved)} icon={<IconMdf size={15} />} />
             <MetricCard
               label="Reimbursed"
               value={money(summary.reimbursed)}
               tone="ok"
+              icon={<IconMdf size={15} />}
               {...(trends.reimbursed.length >= 2
                 ? { trend: { values: trends.reimbursed, delta: trendDelta(trends.reimbursed) } }
                 : {})}
@@ -337,15 +343,17 @@ export default async function MdfPage({
               label="Pending claim"
               value={money(summary.remaining)}
               tone={summary.remaining > 0 ? "warn" : "neutral"}
+              icon={<IconClock size={15} />}
               {...(trends.remaining.length >= 2
                 ? { trend: { values: trends.remaining, delta: trendDelta(trends.remaining), invert: true } }
                 : {})}
             />
-            <MetricCard label="Expected pipeline" value={money(summary.pipeline)} />
-            <MetricCard label="Avg ROI" value={summary.roi == null ? "—" : `${summary.roi}x`} tone="accent" />
+            <MetricCard label="Expected pipeline" value={money(summary.pipeline)} icon={<IconPortfolio size={15} />} />
+            <MetricCard label="Avg ROI" value={summary.roi == null ? "—" : `${summary.roi}x`} tone="accent" icon={<IconReports size={15} />} size="lg" />
             <MetricCard
               label="Open"
               value={String(summary.openCount)}
+              icon={<IconTasks size={15} />}
               {...(trends.openCount.length >= 2
                 ? { trend: { values: trends.openCount, delta: trendDelta(trends.openCount), invert: true } }
                 : {})}
@@ -354,6 +362,7 @@ export default async function MdfPage({
               label="Deadline risks"
               value={String(summary.deadlineRisks)}
               tone={summary.deadlineRisks > 0 ? "danger" : "neutral"}
+              icon={<IconWarning size={15} />}
               {...(summary.deadlineRisks > 0 ? { tint: "danger" as const } : {})}
             />
           </MetricStrip>

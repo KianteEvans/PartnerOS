@@ -35,3 +35,24 @@ export function trendDelta(values: readonly number[]): number | null {
   if (values.length < 2) return null;
   return values[values.length - 1]! - values[values.length - 2]!;
 }
+
+/** Sparkline + delta-chip payload for a MetricCard (the `trend` prop). */
+export interface MetricTrend {
+  readonly values: readonly number[];
+  readonly delta: number | null;
+  readonly invert?: boolean | undefined;
+  readonly deltaSuffix?: string | undefined;
+}
+
+/**
+ * Build a MetricTrend from a raw 14-day metric series. Returns undefined for a
+ * series shorter than 2 points (a line needs two, a delta needs a prior value),
+ * so a card fed thin history simply falls back to its `sub` text.
+ */
+export function mkTrend(
+  series: readonly number[],
+  opts?: { invert?: boolean; suffix?: string },
+): MetricTrend | undefined {
+  if (series.length < 2) return undefined;
+  return { values: series, delta: trendDelta(series), invert: opts?.invert, deltaSuffix: opts?.suffix };
+}

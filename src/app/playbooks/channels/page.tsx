@@ -13,6 +13,8 @@ import { MutationForm } from "@/components/ui/MutationForm";
 import { PlaybooksNav } from "@/app/playbooks/PlaybooksNav";
 import { loadWebhooks } from "@/domain/playbooks/load";
 import { createWebhook, toggleWebhook, deleteWebhook } from "@/domain/playbooks/actions";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const control: CSSProperties = {
   width: "100%",
@@ -30,6 +32,8 @@ const span: CSSProperties = { fontWeight: 600, color: "var(--muted)" };
 export default async function PlaybookChannelsPage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("playbooks_auto");
+  if (fenced) return <PackageFence feature="playbooks_auto" previewTier={fenced} />;
   const hooks = await loadWebhooks(identity);
 
   const addWebhook = (

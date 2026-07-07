@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sparklinePoints, trendDelta } from "@/domain/trend";
+import { mkTrend, sparklinePoints, trendDelta } from "@/domain/trend";
 
 describe("sparklinePoints", () => {
   it("returns empty for no values", () => {
@@ -39,5 +39,23 @@ describe("trendDelta", () => {
     expect(trendDelta([3, 5])).toBe(2);
     expect(trendDelta([8, 6, 3])).toBe(-3);
     expect(trendDelta([4, 4])).toBe(0);
+  });
+});
+
+describe("mkTrend", () => {
+  it("returns undefined for a series shorter than 2 points", () => {
+    expect(mkTrend([])).toBeUndefined();
+    expect(mkTrend([7])).toBeUndefined();
+  });
+  it("builds values + delta from the series", () => {
+    const t = mkTrend([3, 5, 9]);
+    expect(t?.values).toEqual([3, 5, 9]);
+    expect(t?.delta).toBe(4); // 9 - 5
+  });
+  it("passes invert + suffix options through", () => {
+    const t = mkTrend([10, 6], { invert: true, suffix: "%" });
+    expect(t?.invert).toBe(true);
+    expect(t?.deltaSuffix).toBe("%");
+    expect(t?.delta).toBe(-4);
   });
 });

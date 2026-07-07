@@ -22,6 +22,8 @@ import {
   withdrawFundingSubmission,
 } from "@/domain/funding/actions";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const control: CSSProperties = {
@@ -44,6 +46,8 @@ export default async function FundingSubmissionDetail({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("funding");
+  if (fenced) return <PackageFence feature="funding" previewTier={fenced} />;
   const { id } = await params;
   const data = await loadSubmissionDetail(identity, id);
   if (!data) notFound();

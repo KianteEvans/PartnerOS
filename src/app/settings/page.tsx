@@ -13,6 +13,13 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { Callout } from "@/components/ui/Callout";
+import { isIncluded, PACKAGE_TIERS, PACKAGE_META } from "@/domain/packaging/catalog";
+import {
+  getPackagePreview,
+  effectivePackageTier,
+  currentWorkspacePlan,
+} from "@/domain/packaging/preview";
+import { setPackagePreview } from "@/domain/packaging/preview-actions";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { BarChart } from "@/components/ui/BarChart";
 import { ActivityList } from "@/components/ui/ActivityList";
@@ -144,14 +151,26 @@ export default async function SettingsPage({
     decisionCounts[decision] = (decisionCounts[decision] ?? 0) + 1;
   }
 
+  // Package preview: the governance suite (audit/activity, data & privacy/DSAR,
+  // SSO/SCIM, session revocation) is an Enterprise-package feature. Core settings
+  // stay open in every tier.
+  // Feature gating uses the EFFECTIVE tier (real plan clamped by any preview);
+  // the panel below surfaces the real plan and the raw preview cookie separately.
+  const previewCookie = await getPackagePreview();
+  const realPlan = await currentWorkspacePlan();
+  const effectiveTier = await effectivePackageTier();
+  const governance = isIncluded(effectiveTier, "settings_governance");
+  const showPlaybooks = isIncluded(effectiveTier, "playbooks");
+  const autoPlaybooks = isIncluded(effectiveTier, "playbooks_auto");
+
   // Left-nav sections — gated by permission so a viewer never sees an empty pane.
   const sections: { key: SectionKey; label: string }[] = [
     { key: "general", label: "General" },
     { key: "members", label: "Members" },
     { key: "integrations", label: "Integrations" },
     { key: "readiness", label: "Readiness" },
-    ...(canManage ? ([{ key: "data", label: "Data & privacy" }] as const) : []),
-    ...(canAudit ? ([{ key: "activity", label: "Activity" }] as const) : []),
+    ...(canManage && governance ? ([{ key: "data", label: "Data & privacy" }] as const) : []),
+    ...(canAudit && governance ? ([{ key: "activity", label: "Activity" }] as const) : []),
   ];
   const sp = await searchParams;
   const active: SectionKey = sections.some((s) => s.key === sp.section)
@@ -205,6 +224,38 @@ export default async function SettingsPage({
 
           {active === "general" && (
             <>
+              {canManage && (
+                <Panel title="Package preview" accent="var(--accent-2)">
+                  <p style={{ fontSize: 13, marginTop: 0, marginBottom: 8 }}>
+                    This workspace is on the{" "}
+                    <strong style={{ color: "var(--accent-2)" }}>{PACKAGE_META[realPlan].label}</strong>{" "}
+                    package{realPlan === "enterprise" ? " (full platform)" : ""}. Your agency sets this.
+                  </p>
+                  <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
+                    Preview the platform as a lower package would see it — changes only what
+                    <strong> you</strong> see, expires after 8 hours, and can never show more than the real
+                    package. Fenced sections show upgrade screens, never errors.
+                  </p>
+                  <MutationForm action={setPackagePreview} submitLabel="Apply preview">
+                    <label style={labelStyle}>
+                      <span style={spanStyle}>Preview as</span>
+                      <select name="tier" defaultValue={previewCookie ?? "off"} style={controlStyle}>
+                        <option value="off">Full platform (no preview)</option>
+                        {PACKAGE_TIERS.map((t) => (
+                          <option key={t} value={t}>{PACKAGE_META[t].label} · {PACKAGE_META[t].stage}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </MutationForm>
+                  {previewCookie && (
+                    <p style={{ fontSize: 12.5, color: "var(--accent-2)", marginBottom: 0, marginTop: 10 }}>
+                      Currently previewing <strong>{PACKAGE_META[previewCookie].label}</strong>. Choose &ldquo;Full
+                      platform&rdquo; above or use the banner to exit.
+                    </p>
+                  )}
+                </Panel>
+              )}
+
               <Panel title="Workspace">
                 {canManage ? (
                   <MutationForm action={updateWorkspaceSettings} submitLabel="Save">
@@ -213,12 +264,21 @@ export default async function SettingsPage({
                       <input name="displayName" maxLength={200} defaultValue={data.settings?.displayName ?? ""} style={controlStyle} />
                     </label>
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
-                      <label style={labelStyle}>
-                        <span style={spanStyle}>Automation mode</span>
-                        <select name="automationMode" defaultValue={mode} style={controlStyle}>
-                          {AUTOMATION_MODES.map((m) => <option key={m} value={m}>{AUTOMATION_MODE_LABELS[m]}</option>)}
-                        </select>
-                      </label>
+                      {showPlaybooks && (
+                        <label style={labelStyle}>
+                          <span style={spanStyle}>Automation mode</span>
+                          <select name="automationMode" defaultValue={mode} style={controlStyle}>
+                            {AUTOMATION_MODES.filter((m) => autoPlaybooks || m === "off" || m === "recommend_only").map((m) => (
+                              <option key={m} value={m}>{AUTOMATION_MODE_LABELS[m]}</option>
+                            ))}
+                          </select>
+                          {!autoPlaybooks && (
+                            <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                              Automatic execution modes are part of Enterprise.
+                            </span>
+                          )}
+                        </label>
+                      )}
                       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
                         <input type="checkbox" name="emailNotifications" defaultChecked={data.settings?.emailNotifications ?? true} />
                         Email notifications
@@ -326,6 +386,7 @@ export default async function SettingsPage({
                 </Panel>
               )}
 
+              {showPlaybooks && (
               <Panel title="Automation governance">
                 <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>{AUTOMATION_MODE_DESCRIPTIONS[mode]}</p>
                 <div style={{ marginBottom: 14 }}>
@@ -347,6 +408,7 @@ export default async function SettingsPage({
                   ))}
                 </div>
               </Panel>
+              )}
             </>
           )}
 
@@ -370,7 +432,7 @@ export default async function SettingsPage({
                         ) : (
                           <span style={{ color: "var(--muted)", fontSize: 13, textTransform: "capitalize" }}>{m.role}</span>
                         )}
-                        {canUsers && (
+                        {canUsers && governance && (
                           <MutationForm
                             action={revokeUserSessions}
                             submitLabel="Revoke sessions"
@@ -387,7 +449,25 @@ export default async function SettingsPage({
                             hidden={{ userId: m.id, status: m.status === "active" ? "disabled" : "active" }}
                           />
                         )}
-                        {canErase && m.status === "disabled" && m.id !== identity.userId && (
+                        {canManage && governance && (
+                          <a
+                            href={`/settings/data-export/subject/${m.id}`}
+                            title={`Export everything held about ${m.email} (DSAR / subject access request)`}
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              textDecoration: "none",
+                              color: "var(--accent)",
+                              border: "1px solid var(--border)",
+                              borderRadius: 8,
+                              padding: "6px 12px",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Export data
+                          </a>
+                        )}
+                        {canErase && governance && m.status === "disabled" && m.id !== identity.userId && (
                           <FormDrawer
                             triggerLabel="Erase…"
                             triggerVariant="danger"
@@ -460,13 +540,22 @@ export default async function SettingsPage({
             </>
           )}
 
-          {active === "integrations" && canManage && (
+          {active === "integrations" && canManage && !governance && (
+            <Panel title="Single sign-on & provisioning">
+              <Callout tone="info" title="SSO & SCIM are part of Enterprise">
+                SAML single sign-on and SCIM identity provisioning ship with the Enterprise package —
+                the tier where IT owns identity. Every other integration below stays available.
+              </Callout>
+            </Panel>
+          )}
+
+          {active === "integrations" && canManage && governance && (
             <Panel title="Identity provisioning (SCIM)">
               <ScimPanel enabled={data.sso?.scimEnabled ?? false} baseUrl={scimBase} />
             </Panel>
           )}
 
-          {active === "integrations" && canManage && (
+          {active === "integrations" && canManage && governance && (
             <Panel title="SAML single sign-on">
               <SamlConfigPanel
                 config={{
@@ -610,6 +699,12 @@ export default async function SettingsPage({
               >
                 Export workspace data (JSON)
               </a>
+              <p style={{ color: "var(--muted)", marginTop: 14, marginBottom: 0, fontSize: 12.5 }}>
+                For a single person&rsquo;s data (a GDPR/CCPA subject access request), use
+                <strong> Export data</strong> next to that member in the Members tab — it returns only
+                their profile, invitations, audit activity, saved views, and references to the records
+                they authored.
+              </p>
             </Panel>
           )}
 

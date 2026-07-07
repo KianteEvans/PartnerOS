@@ -16,6 +16,10 @@ export interface HubTrends {
   readonly activePrograms: number[];
   readonly tierProgress: number[];
   readonly marketplaceRevenue: number[];
+  readonly winRate: number[];
+  readonly evidence: number[];
+  readonly mdfRoiX100: number[];
+  readonly health: number[];
 }
 
 export interface MetricSnapshotValues {
@@ -107,6 +111,10 @@ export async function loadHubTrends(
         activePrograms: metricSnapshots.activePrograms,
         tierPercent: metricSnapshots.tierPercent,
         marketplaceRevenue: metricSnapshots.marketplaceAttributedRevenueCents,
+        winRatePercent: metricSnapshots.winRatePercent,
+        evidencePercent: metricSnapshots.evidencePercent,
+        mdfRoiX100: metricSnapshots.mdfRoiX100,
+        healthScore: metricSnapshots.healthScore,
       })
       .from(metricSnapshots)
       .where(eq(metricSnapshots.tenantId, identity.tenantId))
@@ -122,6 +130,10 @@ export async function loadHubTrends(
         activePrograms: v.activePrograms,
         tierPercent: v.tierPercent,
         marketplaceRevenue: v.marketplaceRevenueCents ?? 0,
+        winRatePercent: v.winRatePercent ?? null,
+        evidencePercent: v.evidencePercent ?? 0,
+        mdfRoiX100: v.mdfRoiX100 ?? null,
+        healthScore: v.healthScore,
       };
       s =
         s[s.length - 1]?.capturedOn === todayOverlay.today
@@ -134,6 +146,10 @@ export async function loadHubTrends(
       activePrograms: s.map((r) => r.activePrograms),
       tierProgress: s.map((r) => r.tierPercent ?? 0),
       marketplaceRevenue: s.map((r) => r.marketplaceRevenue),
+      winRate: s.map((r) => r.winRatePercent ?? 0),
+      evidence: s.map((r) => r.evidencePercent ?? 0),
+      mdfRoiX100: s.map((r) => r.mdfRoiX100 ?? 0),
+      health: s.map((r) => r.healthScore),
     };
   });
 }

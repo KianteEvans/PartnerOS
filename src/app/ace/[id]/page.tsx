@@ -23,6 +23,8 @@ import { CaseStudyPitch } from "./CaseStudyPitch";
 import { isCaseStudyPitchEnabled } from "@/domain/ace/case-study-pitch-ai";
 import { lifecycleSteps, PRIVATE_OFFER_STATUS_LABELS, type PrivateOfferStatus } from "@/domain/marketplace/private-offers";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const OFFER_TONE = (s: PrivateOfferStatus): "ok" | "info" | "danger" =>
@@ -40,6 +42,8 @@ const BAND_TONE: Record<HealthBand, "ok" | "info" | "warn" | "danger"> = {
 export default async function DealDeskPage({ params }: { params: Promise<{ id: string }> }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("deal_desk");
+  if (fenced) return <PackageFence feature="deal_desk" previewTier={fenced} />;
   const { id } = await params;
   const model = await loadDealDesk(identity, id);
   if (!model) notFound();

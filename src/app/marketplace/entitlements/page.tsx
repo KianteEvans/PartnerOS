@@ -25,6 +25,8 @@ import {
 import { syncEntitlements } from "@/domain/marketplace/actions";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { tableView } from "@/domain/marketplace/table-view";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const STATUS_TONE: Record<EntitlementStatus, Tone> = { active: "ok", expiring: "warn", expired: "danger" };
 const STATUS_LABEL: Record<EntitlementStatus, string> = { active: "Active", expiring: "Expiring", expired: "Expired" };
@@ -36,6 +38,8 @@ export default async function EntitlementsPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
   const params = parseListParams(await searchParams, {
     sortable: ["expires", "customer", "listing", "dimension", "value", "status"],

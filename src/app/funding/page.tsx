@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { IconFunding, IconMdf, IconTiers } from "@/components/ui/icons";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { FundingNav } from "@/app/funding/FundingNav";
 import { ApplyDrawer } from "@/app/funding/ApplyDrawer";
@@ -19,6 +20,8 @@ import {
   type FundingType,
 } from "@/domain/funding/catalog";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const TYPE_TONE: Record<FundingType, "ok" | "info" | "accent"> = { cash: "ok", credits: "info", both: "accent" };
 
@@ -29,6 +32,8 @@ export default async function FundingCatalogPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("funding");
+  if (fenced) return <PackageFence feature="funding" previewTier={fenced} />;
   const { cat } = await searchParams;
 
   const categories = [...new Set(FUNDING_PROGRAMS.map((p) => p.category))];
@@ -50,10 +55,10 @@ export default async function FundingCatalogPage({
       <FundingNav />
 
       <MetricStrip>
-        <MetricCard label="Programs" value={String(FUNDING_PROGRAMS.length)} sub="funding mechanisms" />
-        <MetricCard label="Cash" value={String(cash)} tone="ok" sub="cash incentives" />
-        <MetricCard label="Credits" value={String(credits)} tone="info" sub="AWS credit programs" />
-        <MetricCard label="Categories" value={String(categories.length)} sub="migration → incentive" />
+        <MetricCard label="Programs" value={String(FUNDING_PROGRAMS.length)} sub="funding mechanisms" icon={<IconFunding size={15} />} />
+        <MetricCard label="Cash" value={String(cash)} tone="ok" sub="cash incentives" icon={<IconMdf size={15} />} />
+        <MetricCard label="Credits" value={String(credits)} tone="info" sub="AWS credit programs" icon={<IconMdf size={15} />} />
+        <MetricCard label="Categories" value={String(categories.length)} sub="migration → incentive" icon={<IconTiers size={15} />} />
       </MetricStrip>
 
       <SegmentedControl

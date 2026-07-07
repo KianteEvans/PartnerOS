@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { withSystem } from "@/db/client";
-import { tenants, agencyLinkRequests, onboarding } from "@/db/schema";
+import { tenants, agencyLinkRequests, onboarding, invitations } from "@/db/schema";
 import type { MutationContext } from "@/gate/mutation-gate";
 import { ValidationError, ForbiddenError } from "@/http/errors";
-import { ensureAgencyServiceUser } from "@/auth/agency";
+import { ensureAgencyServiceUser, assertManages } from "@/auth/agency";
+import type { PackageTier } from "@/domain/packaging/catalog";
 
 /**
  * Agency / portfolio write operations (Bet C). Two flavors:
@@ -24,11 +26,16 @@ function slugify(name: string): string {
   return base || "workspace";
 }
 
+type ManagedInviteRole = "admin" | "manager" | "member" | "viewer";
+
 /** Provision a brand-new workspace owned by the calling agency from birth. */
 export async function createManagedWorkspaceOp(
   { identity }: MutationContext,
-  input: { readonly name: string },
-): Promise<{ tenantId: string }> {
+  input: {
+    readonly name: string;
+    readonly initialUsers?: readonly { email: string; role: ManagedInviteRole }[];
+  },
+): Promise<{ tenantId: string; invited: { email: string; role: ManagedInviteRole }[] }> {
   const name = input.name.trim();
   if (!name) throw new ValidationError("Workspace name is required");
   return withSystem(async (tx) => {
@@ -54,13 +61,40 @@ export async function createManagedWorkspaceOp(
 
     const [child] = await tx
       .insert(tenants)
-      .values({ name, slug, agencyId: identity.tenantId })
+      // New customer workspaces start at the entry package; OBP moves them up
+      // via setCustomerPlan. (The column default is 'enterprise' for everyone
+      // else, so existing/self workspaces stay fully unlocked.)
+      .values({ name, slug, agencyId: identity.tenantId, plan: "essentials" })
       .returning({ id: tenants.id });
-    await ensureAgencyServiceUser(tx, identity.tenantId, child!.id);
+    const svc = await ensureAgencyServiceUser(tx, identity.tenantId, child!.id);
     // Agency-provisioned workspaces skip onboarding (the agency owns them) so their
     // home hub renders immediately when the operator acts-as.
     await tx.insert(onboarding).values({ tenantId: child!.id, status: "completed" });
-    return { tenantId: child!.id };
+
+    // Seed pending invitations for the customer's initial team. The workspace is
+    // brand-new (only the agency service user exists), so there's nothing to
+    // collide with — just de-dupe the input. Emails are sent by the action,
+    // post-commit. "Invited by" is the agency service user (a child-tenant admin).
+    const invited: { email: string; role: ManagedInviteRole }[] = [];
+    const seen = new Set<string>();
+    for (const u of input.initialUsers ?? []) {
+      const email = u.email.trim().toLowerCase();
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      invited.push({ email, role: u.role });
+    }
+    if (invited.length > 0) {
+      await tx.insert(invitations).values(
+        invited.map((u) => ({
+          tenantId: child!.id,
+          email: u.email,
+          role: u.role,
+          token: randomUUID(),
+          invitedByUserId: svc.id,
+        })),
+      );
+    }
+    return { tenantId: child!.id, invited };
   });
 }
 
@@ -164,4 +198,21 @@ export async function rejectLinkOp(
     .set({ status: "rejected", decidedAt: new Date(), decidedBy: identity.userId })
     .where(eq(agencyLinkRequests.id, req.id));
   return { ok: true };
+}
+
+/**
+ * Set a managed customer workspace's service package (real entitlement, drizzle/0059).
+ * Cross-tenant write, so it runs via `withSystem` AFTER `assertManages` proves the
+ * target is a workspace this agency owns — the same security crux as the create/link
+ * ops. (assertManages also rejects the agency's own tenant, since its agency_id is null.)
+ */
+export async function setCustomerPlanOp(
+  { identity }: MutationContext,
+  input: { readonly workspaceId: string; readonly plan: PackageTier },
+): Promise<{ workspaceId: string; plan: PackageTier }> {
+  await assertManages(identity.tenantId, input.workspaceId);
+  return withSystem(async (tx) => {
+    await tx.update(tenants).set({ plan: input.plan }).where(eq(tenants.id, input.workspaceId));
+    return { workspaceId: input.workspaceId, plan: input.plan };
+  });
 }

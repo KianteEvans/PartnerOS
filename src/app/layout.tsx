@@ -15,6 +15,8 @@ import { tryGetServerIdentity } from "@/auth/session";
 import { loadNotifications } from "@/domain/notifications/load";
 import { loadTenantMeta } from "@/auth/agency";
 import { ActingAsBanner } from "@/app/ActingAsBanner";
+import { PackagePreviewBanner } from "@/app/PackagePreviewBanner";
+import { getPackagePreview, effectivePackageTier } from "@/domain/packaging/preview";
 
 /**
  * Display face for headings. `variable` exposes it as `--font-display-loaded`,
@@ -33,13 +35,37 @@ export const metadata: Metadata = {
   description: "AWS Partner management — program readiness, MDF, compliance.",
 };
 
+/**
+ * Sections that get a `--section-accent` identity. Kept in sync with the
+ * pre-paint inline script and SectionTheme; used to server-render `data-section`
+ * so SSR and the client script agree (no hydration mismatch).
+ */
+const THEMED_SECTIONS = new Set([
+  "command",
+  "ace",
+  "mdf",
+  "funding",
+  "programs",
+  "plan",
+  "reports",
+  "marketplace",
+  "playbooks",
+]);
+
 export default async function RootLayout({
   children,
 }: {
   children: ReactNode;
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const hdrs = await headers();
+  const nonce = hdrs.get("x-nonce") ?? undefined;
+  // Server-render the active section on <html> (from the middleware-set
+  // x-pathname) so it matches what the pre-paint script sets on the client —
+  // otherwise React reports a hydration mismatch on `data-section`. The
+  // allowlist must stay in sync with the inline script + SectionTheme below.
+  const section = (hdrs.get("x-pathname") ?? "").split("/")[1] ?? "";
+  const dataSection = THEMED_SECTIONS.has(section) ? section : undefined;
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const year = now.getFullYear();
@@ -55,13 +81,18 @@ export default async function RootLayout({
   // is the operator currently acting inside a managed workspace (show the banner)?
   const tenantMeta = identity ? await loadTenantMeta(identity.tenantId) : null;
   const isAgency = tenantMeta?.isAgency ?? false;
+  // Service package: nav filters on the workspace's EFFECTIVE entitlement (real
+  // tenants.plan, clamped down by any per-user preview cookie); the banner shows
+  // only while a preview cookie is actively set. Pages fence via packageFenceFor.
+  const previewCookie = identity ? await getPackagePreview() : null;
+  const packageTier = identity ? await effectivePackageTier() : null;
   const actingBanner =
     identity?.actingAs && tenantMeta
       ? { workspaceName: tenantMeta.name, agencyName: identity.actingAs.agencyName }
       : null;
 
   return (
-    <html lang="en" className={display.variable}>
+    <html lang="en" className={display.variable} data-section={dataSection}>
       <body>
         {/* Apply the saved theme + density before paint to avoid a flash of the
             defaults. Keep the storage keys in sync with TopBar. */}
@@ -74,7 +105,7 @@ export default async function RootLayout({
         />
         {identity ? (
           <div style={{ display: "flex", minHeight: "100vh" }}>
-            <Sidebar email={identity.email} isAgency={isAgency} />
+            <Sidebar email={identity.email} isAgency={isAgency} previewTier={packageTier} />
             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
               {actingBanner ? (
                 <ActingAsBanner
@@ -82,15 +113,16 @@ export default async function RootLayout({
                   agencyName={actingBanner.agencyName}
                 />
               ) : null}
+              {previewCookie ? <PackagePreviewBanner tier={previewCookie} /> : null}
               <TopBar
                 email={identity.email}
                 role={identity.role}
                 notifications={notifications}
               />
               <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
-              <Footer year={year} />
+              <Footer year={year} previewTier={packageTier} />
             </div>
-            <CommandPalette />
+            <CommandPalette previewTier={packageTier} />
             <SectionTheme />
             <SessionKeepalive />
           </div>

@@ -8,6 +8,8 @@ import { tasks, users } from "@/db/schema";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CommandNav } from "@/app/command/CommandNav";
+import { isIncluded } from "@/domain/packaging/catalog";
+import { effectivePackageTier } from "@/domain/packaging/preview";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { MetricCard } from "@/components/ui/MetricCard";
@@ -90,6 +92,7 @@ export default async function TasksPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const showGraph = isIncluded(await effectivePackageTier(), "command_graph");
 
   const sp = await searchParams;
   const viewParam = Array.isArray(sp.view) ? sp.view[0] : sp.view;
@@ -173,7 +176,7 @@ export default async function TasksPage({
           </FormDrawer>
         }
       />
-      <CommandNav />
+      <CommandNav showGraph={showGraph} />
 
       <MetricStrip min={160}>
         <MetricCard label="Open" value={String(counts.all)} />

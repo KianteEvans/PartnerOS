@@ -14,6 +14,8 @@ import { ApplyDrawer } from "@/app/funding/ApplyDrawer";
 import { loadFundingMatcher } from "@/domain/funding/load";
 import { matchPrograms } from "@/domain/funding/eligibility";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 export default async function FundingMatcherPage({
@@ -23,6 +25,8 @@ export default async function FundingMatcherPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("funding");
+  if (fenced) return <PackageFence feature="funding" previewTier={fenced} />;
   const { opp } = await searchParams;
 
   const { deals, context, applied } = await loadFundingMatcher(identity, opp);

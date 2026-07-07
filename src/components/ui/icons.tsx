@@ -136,6 +136,12 @@ export const IconPlaybook = (p: IconProps): ReactNode => (
   </Svg>
 );
 
+export const IconBd = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M3 11l18-7-7 18-2.5-7.5L3 11z" />
+  </Svg>
+);
+
 export const IconEvidence = (p: IconProps): ReactNode => (
   <Svg {...p}>
     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -154,6 +160,32 @@ export const IconTasks = (p: IconProps): ReactNode => (
   <Svg {...p}>
     <polyline points="9 11 12 14 22 4" />
     <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  </Svg>
+);
+
+export const IconTrophy = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M7 4h10v5a5 5 0 0 1-10 0z" />
+    <path d="M7 5H4v1a3 3 0 0 0 3 3" />
+    <path d="M17 5h3v1a3 3 0 0 1-3 3" />
+    <path d="M12 14v4" />
+    <path d="M9 21h6" />
+    <path d="M9.5 18h5" />
+  </Svg>
+);
+
+export const IconClock = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <polyline points="12 7 12 12 15 14" />
+  </Svg>
+);
+
+export const IconWarning = (p: IconProps): ReactNode => (
+  <Svg {...p}>
+    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
   </Svg>
 );
 

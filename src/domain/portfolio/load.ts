@@ -5,6 +5,7 @@ import { tenants } from "@/db/schema";
 import { can, type Role } from "@/authz/permissions";
 import { loadCommandData } from "@/domain/command/load";
 import { buildCommandCenter, type CommandCenter } from "@/domain/command/aggregate";
+import { loadHubTrends, type HubTrends } from "@/domain/command/trends-load";
 import { loadTenantMeta, type TenantMeta } from "@/auth/agency";
 import {
   portfolioRollup,
@@ -43,7 +44,7 @@ function synthIdentity(childId: string, operatorId: string): DbIdentity {
 }
 
 function summarize(
-  meta: { id: string; name: string; slug: string; tier: string },
+  meta: { id: string; name: string; slug: string; tier: string; plan: string },
   cc: CommandCenter,
   pipeline: number,
 ): WorkspaceSummary {
@@ -52,6 +53,7 @@ function summarize(
     name: meta.name,
     slug: meta.slug,
     tier: meta.tier,
+    plan: meta.plan,
     health: cc.health.score,
     band: cc.health.band,
     openWork: cc.work.open,
@@ -78,7 +80,7 @@ export async function loadPortfolio(identity: DbIdentity): Promise<PortfolioView
 
   const children = await withSystem((tx) =>
     tx
-      .select({ id: tenants.id, name: tenants.name, slug: tenants.slug, tier: tenants.tier })
+      .select({ id: tenants.id, name: tenants.name, slug: tenants.slug, tier: tenants.tier, plan: tenants.plan })
       .from(tenants)
       .where(eq(tenants.agencyId, identity.tenantId))
       .orderBy(asc(tenants.name)),
@@ -107,6 +109,7 @@ export async function loadPortfolio(identity: DbIdentity): Promise<PortfolioView
 export interface ManagedWorkspaceView {
   readonly meta: TenantMeta;
   readonly cc: CommandCenter;
+  readonly trends: HubTrends;
   readonly ownerName: (id: string | null) => string;
 }
 
@@ -124,13 +127,16 @@ export async function loadManagedWorkspace(
   const child = await loadTenantMeta(childId);
   if (!child || child.agencyId !== identity.tenantId) return null; // authz boundary
 
-  const data = await loadCommandData(synthIdentity(childId, identity.userId));
+  const synth = synthIdentity(childId, identity.userId);
+  const data = await loadCommandData(synth);
   const today = new Date().toISOString().slice(0, 10);
   const cc = buildCommandCenter(data.inputs, today);
+  const trends = await loadHubTrends(synth);
   const emailById = new Map(data.members.map((m) => [m.id, m.email]));
   return {
     meta: child,
     cc,
+    trends,
     ownerName: (id) => (id ? (emailById.get(id) ?? "-") : "Unassigned"),
   };
 }

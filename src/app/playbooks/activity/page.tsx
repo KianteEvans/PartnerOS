@@ -12,6 +12,8 @@ import { PlaybooksNav } from "@/app/playbooks/PlaybooksNav";
 import { loadRuns, loadInbox, type PlaybookRunRow } from "@/domain/playbooks/load";
 import { approvePlaybookRun, dismissPlaybookRun, markNotificationRead } from "@/domain/playbooks/actions";
 import { RUN_STATUS_LABELS, type RunStatus } from "@/domain/playbooks/lifecycle";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const STATUS_TONE: Record<RunStatus, "neutral" | "info" | "ok" | "danger" | "warn"> = {
   recommended: "info",
@@ -41,6 +43,8 @@ function resultSummary(r: PlaybookRunRow): string {
 export default async function PlaybookActivityPage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("playbooks");
+  if (fenced) return <PackageFence feature="playbooks" previewTier={fenced} />;
   const [runs, inbox] = await Promise.all([loadRuns(identity, 200), loadInbox(identity, 30)]);
   const sevTone = (s: string): "danger" | "warn" | "info" => (s === "critical" ? "danger" : s === "high" ? "warn" : "info");
 

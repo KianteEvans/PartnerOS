@@ -12,7 +12,8 @@ import { Card } from "@/components/ui/Card";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { ActivityList } from "@/components/ui/ActivityList";
-import { MetricCard, type MetricTrend } from "@/components/ui/MetricCard";
+import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { ButtonLink } from "@/components/ui/Button";
 import { MarketingHome } from "@/components/marketing/MarketingHome";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -22,6 +23,10 @@ import {
   IconRoadmaps,
   IconMdf,
   IconTasks,
+  IconClock,
+  IconPrograms,
+  IconTiers,
+  IconMarketplace,
   type IconProps,
 } from "@/components/ui/icons";
 import { loadCommandData } from "@/domain/command/load";
@@ -34,21 +39,15 @@ import { completeness } from "@/domain/evidence/inventory";
 import { portfolioSummary as mdfPortfolioSummary } from "@/domain/mdf/analytics";
 import { loadBenchmarks } from "@/domain/benchmarks/load";
 import { BenchmarksPanel } from "@/app/BenchmarksPanel";
-import { trendDelta } from "@/domain/trend";
+import { mkTrend } from "@/domain/trend";
 import type { Decision } from "@/domain/command/brief";
 import { progressPercent, stepIndex, WIZARD_STEPS, type OnboardingStepId } from "@/domain/onboarding/catalog";
 import { loadActivation } from "@/domain/onboarding/activation-load";
 import { activationChecklist } from "@/domain/onboarding/activation";
 import { HomeActivation } from "@/app/HomeActivation";
 import { moneyFromCents } from "@/domain/format";
-
-function mkTrend(
-  series: number[],
-  opts?: { invert?: boolean; suffix?: string },
-): MetricTrend | undefined {
-  if (series.length < 2) return undefined;
-  return { values: series, delta: trendDelta(series), invert: opts?.invert, deltaSuffix: opts?.suffix };
-}
+import { isPathIncluded } from "@/domain/packaging/catalog";
+import { effectivePackageTier } from "@/domain/packaging/preview";
 
 const money = (cents: number): string => moneyFromCents(cents, 0);
 
@@ -175,7 +174,8 @@ async function SignedIn({
     { perm: "mdf:create", href: "/mdf", label: "Request MDF", hint: "Start a funding claim", Icon: IconMdf },
     { perm: "task:create", href: "/command/tasks", label: "New task", hint: "Assign to your team", Icon: IconTasks },
   ];
-  const actions = quickActions.filter((q) => can(identity.role, q.perm));
+  const previewTier = await effectivePackageTier();
+  const actions = quickActions.filter((q) => can(identity.role, q.perm) && isPathIncluded(previewTier, q.href));
 
   return (
     <PageShell>
@@ -209,23 +209,19 @@ async function SignedIn({
             <Badge tone={BAND_TONE[cc.health.band] ?? "neutral"}>{BAND_LABEL[cc.health.band] ?? cc.health.band}</Badge>
           </div>
         </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 244,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))",
-            gap: 12,
-          }}
-        >
+        <MetricStrip min={132} style={{ flex: 1, minWidth: 244 }}>
           <MetricCard
             label="Open work"
+            href="/command/tasks"
+            icon={<IconTasks size={15} />}
             value={String(cc.work.open)}
             sub="tasks in flight"
             trend={mkTrend(trends.openWork)}
           />
           <MetricCard
             label="Overdue"
+            href="/command/tasks?view=overdue"
+            icon={<IconClock size={15} />}
             value={String(cc.work.overdue)}
             tone={cc.work.overdue > 0 ? "danger" : "neutral"}
             tint={cc.work.overdue > 0 ? "danger" : undefined}
@@ -234,24 +230,31 @@ async function SignedIn({
           />
           <MetricCard
             label="Active programs"
+            href="/programs?view=active"
+            icon={<IconPrograms size={15} />}
             value={`${cc.progress.programsActive}/${cc.progress.programsTotal}`}
             sub="competencies & tiers"
             trend={mkTrend(trends.activePrograms)}
           />
           <MetricCard
             label="Tier progress"
+            href="/programs/tiers"
+            icon={<IconTiers size={15} />}
             value={cc.progress.tierPercent == null ? "—" : `${cc.progress.tierPercent}%`}
             sub="to next tier"
             trend={cc.progress.tierPercent == null ? undefined : mkTrend(trends.tierProgress, { suffix: "%" })}
           />
           <MetricCard
             label="Marketplace revenue"
+            href="/marketplace"
+            icon={<IconMarketplace size={15} />}
+            size="lg"
             value={money(mpRevenueCents)}
             sub="attributed (AWS)"
             tint="accent"
             trend={mkTrend(mp?.revenue ?? [])}
           />
-        </div>
+        </MetricStrip>
       </section>
 
       {/* Getting started — shown only until the partner is activated */}

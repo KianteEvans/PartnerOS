@@ -17,8 +17,13 @@ import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { CommandNav } from "@/app/command/CommandNav";
 import { AllianceCopilot } from "@/app/command/AllianceCopilot";
 import { env } from "@/env";
+import { isIncluded } from "@/domain/packaging/catalog";
+import { effectivePackageTier } from "@/domain/packaging/preview";
 import { loadCommandData } from "@/domain/command/load";
 import { buildCommandCenter } from "@/domain/command/aggregate";
+import { loadHubTrends } from "@/domain/command/trends-load";
+import { mkTrend } from "@/domain/trend";
+import { IconPortfolio, IconMdf, IconPrograms } from "@/components/ui/icons";
 import { loadBenchmarks, pickPosition } from "@/domain/benchmarks/load";
 import { BenchmarkBand } from "@/components/ui/BenchmarkBand";
 import { TIER_LABELS, type TierId } from "@/domain/tiers/catalog";
@@ -88,6 +93,15 @@ export default async function CommandPage({
   if (!identity) redirect("/");
   const canReceipts = can(identity.role, "audit:read");
 
+  // Package preview: the Command Center core (health, decision queue, Your Move)
+  // is open in every tier; Copilot, the scenario/horizon planner, the graph, and
+  // the QBR export are Enterprise/Growth features.
+  const preview = await effectivePackageTier();
+  const showCopilot = isIncluded(preview, "copilot");
+  const showScenario = isIncluded(preview, "scenario_planning");
+  const showGraph = isIncluded(preview, "command_graph");
+  const showQbr = isIncluded(preview, "reports");
+
   const { mode: modeParam, view: viewParam, scenario: scenarioParam } = await searchParams;
   const mode = modeParam === "workbench" ? "workbench" : "executive";
   const view: DecisionView = isView(viewParam) ? viewParam : "all";
@@ -96,14 +110,16 @@ export default async function CommandPage({
 
   const data = await loadCommandData(identity);
   const cc = buildCommandCenter(data.inputs, today, data.dismissedIds);
+  const trends = await loadHubTrends(identity);
 
   // Wave 3: multi-move scenario planner + what-breaks-next (workbench only). The
   // pick list reuses the NBA ranker; the scenario composes the SELECTED candidates'
   // what-if transforms; the outlook re-runs the decision queue at future dates.
-  const pickList = mode === "workbench" ? nextBestActions(data.inputs, today, 10) : [];
+  const scenarioMode = mode === "workbench" && showScenario;
+  const pickList = scenarioMode ? nextBestActions(data.inputs, today, 10) : [];
   const scenario =
-    mode === "workbench" && scenarioKeys.length > 0 ? composeScenario(data.inputs, scenarioKeys, today) : null;
-  const outlook = mode === "workbench" ? whatBreaksNext(data.inputs, today) : null;
+    scenarioMode && scenarioKeys.length > 0 ? composeScenario(data.inputs, scenarioKeys, today) : null;
+  const outlook = scenarioMode ? whatBreaksNext(data.inputs, today) : null;
   const selectedSet = new Set(scenario?.appliedKeys ?? scenarioKeys);
   const scenarioHref = (keys: readonly string[]): string => {
     const params = new URLSearchParams({ mode });
@@ -161,11 +177,11 @@ export default async function CommandPage({
               value={mode}
               hrefFor={(m) => `/command?mode=${m}`}
             />
-            <a href="/command/export" style={{ padding: "6px 14px", borderRadius: 999, fontSize: 13, textDecoration: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>Export packet</a>
+            {showQbr && <a href="/command/export" style={{ padding: "6px 14px", borderRadius: 999, fontSize: 13, textDecoration: "none", border: "1px solid var(--border)", color: "var(--accent)" }}>Export packet</a>}
           </>
         }
       />
-      <CommandNav />
+      <CommandNav showGraph={showGraph} />
 
       {/* Workbench mode clusters its many panels under labeled groups
           (Brief → Act → Simulate → Ask) so the page reads as four moments, not a
@@ -239,10 +255,10 @@ export default async function CommandPage({
           }
         >
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 14 }}>
-            <Stat label="Open" value={cc.work.open} />
-            <Stat label="Overdue" value={cc.work.overdue} danger={cc.work.overdue > 0} />
-            <Stat label="Blocked" value={cc.work.blocked} danger={cc.work.blocked > 0} />
-            <Stat label="Critical" value={cc.work.critical} danger={cc.work.critical > 0} />
+            <MetricCard label="Open" value={String(cc.work.open)} href="/command/tasks" trend={mkTrend(trends.openWork)} />
+            <MetricCard label="Overdue" value={String(cc.work.overdue)} tone={cc.work.overdue > 0 ? "danger" : "neutral"} href="/command/tasks?view=overdue" trend={mkTrend(trends.overdue, { invert: true })} />
+            <MetricCard label="Blocked" value={String(cc.work.blocked)} tone={cc.work.blocked > 0 ? "danger" : "neutral"} href="/command/tasks" />
+            <MetricCard label="Critical" value={String(cc.work.critical)} tone={cc.work.critical > 0 ? "danger" : "neutral"} href="/command/tasks" />
           </div>
         </Panel>
 
@@ -264,6 +280,8 @@ export default async function CommandPage({
         {/* Cross-section snapshot — fills the brief row beside "Decision load by owner". */}
         <MetricCard
           label="Open pipeline"
+          href="/ace"
+          icon={<IconPortfolio size={15} />}
           value={money(pipe.openValue)}
           sub={`${pipe.open} open ${pipe.open === 1 ? "deal" : "deals"}`}
           tone="accent"
@@ -271,6 +289,8 @@ export default async function CommandPage({
         />
         <MetricCard
           label="MDF pending"
+          href="/mdf?view=to_claim"
+          icon={<IconMdf size={15} />}
           value={money(mdf.remaining)}
           sub="approved, unclaimed"
           tone={mdf.deadlineRisks > 0 ? "warn" : "accent"}
@@ -279,9 +299,12 @@ export default async function CommandPage({
         />
         <MetricCard
           label="Active programs"
+          href="/programs?view=active"
+          icon={<IconPrograms size={15} />}
           value={`${cc.progress.programsActive}/${cc.progress.programsTotal}`}
           sub="competencies & tiers"
           tone="ok"
+          trend={mkTrend(trends.activePrograms)}
           style={{ alignSelf: "start" }}
         />
       </div>
@@ -477,7 +500,7 @@ export default async function CommandPage({
       {/* Alliance Copilot — strategic Q&A grounded in the LIVE workspace brief (health,
           decision queue, next-best-actions, tier ETA). A cross-domain assistant ACE
           structurally can't offer, since it has neither the data nor the assistant. */}
-      {mode === "workbench" ? (
+      {showCopilot && (mode === "workbench" ? (
         <details open style={{ display: "grid", gap: 16 }}>
           <GroupSummary label="Ask" caption="a conversational advisor grounded in the live brief" />
           <Panel title="Alliance Copilot" accent="var(--accent-2)">
@@ -488,7 +511,7 @@ export default async function CommandPage({
         <Panel title="Alliance Copilot" accent="var(--accent-2)">
           <AllianceCopilot enabled={copilotEnabled} targetTierLabel={targetTierLabel} />
         </Panel>
-      )}
+      ))}
 
       {mode === "workbench" && <GroupHeading label="Queue & receipts" caption="every open decision, and what automation already did" />}
 
@@ -594,15 +617,6 @@ function GroupSummary({ label, caption }: { label: string; caption: string }): R
       </span>
       <span style={{ color: "var(--muted)", marginLeft: 10 }}>{caption}</span>
     </summary>
-  );
-}
-
-function Stat({ label, value, danger }: { label: string; value: number; danger?: boolean }): ReactNode {
-  return (
-    <div>
-      <div style={{ color: "var(--muted)", fontSize: 12 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: danger ? "var(--danger)" : "var(--text)" }}>{value}</div>
-    </div>
   );
 }
 

@@ -129,6 +129,10 @@
 :root[data-theme="dark"][data-section="marketplace"] { --section-accent: #e879f9; }
 :root[data-theme="dark"][data-section="funding"]     { --section-accent: #22c55e; }
 :root[data-theme="dark"][data-section="playbooks"]   { --section-accent: #fb7185; }
+/* KPI/metric cards read as the section's DATA accent: blue on un-themed routes
+   (data stays blue, not the orange brand) and the section hue on themed routes. */
+:root { --metric-accent: var(--accent-2); }
+:root[data-section] { --metric-accent: var(--section-accent); }
 /* A themed section's hero glows its own colour (un-themed keeps the blue tint). */
 :root[data-section] {
   --surface-hero: linear-gradient(
@@ -286,6 +290,23 @@ button:not(:disabled):active {
 
 a {
   transition: color 0.15s ease;
+}
+
+/* ---------------------------------------------------------------------------
+   Collapsible modules + KPI cards. The header/label acts as a disclosure
+   button; the chevron rotates open (down) / closed (right). Visibility is the
+   `hidden` attribute (bodies stay mounted so forms keep state).
+--------------------------------------------------------------------------- */
+.collapse-chevron {
+  transition: transform 0.15s ease;
+}
+.collapse-header:hover .collapse-chevron {
+  color: var(--text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapse-chevron {
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------------------

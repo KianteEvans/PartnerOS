@@ -22,6 +22,8 @@ import { syncBilling } from "@/domain/marketplace/actions";
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { tableView } from "@/domain/marketplace/table-view";
 import { moneyFromCents as money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 export default async function BillingPage({
@@ -31,6 +33,8 @@ export default async function BillingPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const today = new Date().toISOString().slice(0, 10);
   const params = parseListParams(await searchParams, {
     sortable: ["value", "customer", "offer", "status", "start", "end"],

@@ -38,6 +38,8 @@ export type Permission =
   | "benchmark:read"
   | "portfolio:read"
   | "portfolio:manage"
+  // Set a managed customer workspace's service package (real entitlement).
+  | "billing:set_plan"
   | "assessment:read"
   | "assessment:create"
   | "assessment:update"
@@ -95,6 +97,13 @@ export type Permission =
   | "command:read"
   | "settings:read"
   | "settings:manage"
+  // Business Development agent (outbound sales). draft = have the AI compose an
+  // outreach message; approve = release a first-touch draft and send it.
+  | "bd:read"
+  | "bd:create"
+  | "bd:update"
+  | "bd:draft"
+  | "bd:approve"
   // Personal list presets — every authenticated role manages its own.
   | "view:manage";
 
@@ -117,6 +126,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "benchmark:read",
     "portfolio:read",
     "portfolio:manage",
+    "billing:set_plan",
     "tenant:update",
     "user:read",
     "user:invite",
@@ -184,6 +194,11 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "marketplace:update",
     "marketplace:publish",
     "marketplace:sync",
+    "bd:read",
+    "bd:create",
+    "bd:update",
+    "bd:draft",
+    "bd:approve",
     "view:manage",
   ]),
   admin: new Set<Permission>([
@@ -204,6 +219,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "benchmark:read",
     "portfolio:read",
     "portfolio:manage",
+    "billing:set_plan",
     "tenant:update",
     "user:read",
     "user:invite",
@@ -271,6 +287,11 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "marketplace:update",
     "marketplace:publish",
     "marketplace:sync",
+    "bd:read",
+    "bd:create",
+    "bd:update",
+    "bd:draft",
+    "bd:approve",
     "view:manage",
   ]),
   // A manager runs assessments end-to-end: prepare, submit, and approve the
@@ -349,6 +370,11 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "marketplace:update",
     "marketplace:publish",
     "marketplace:sync",
+    "bd:read",
+    "bd:create",
+    "bd:update",
+    "bd:draft",
+    "bd:approve",
     "view:manage",
   ]),
   // A member prepares draft assessments; submitting and approving are gated.
@@ -391,6 +417,10 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "marketplace:read",
     "marketplace:create",
     "marketplace:update",
+    "bd:read",
+    "bd:create",
+    "bd:update",
+    "bd:draft",
     "view:manage",
   ]),
   viewer: new Set<Permission>([
@@ -417,6 +447,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
     "case_study:read",
     "solution:read",
     "marketplace:read",
+    "bd:read",
     "view:manage",
   ]),
 };

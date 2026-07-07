@@ -18,6 +18,9 @@ import { togglePlaybook, deletePlaybook, updatePlaybook } from "@/domain/playboo
 import { ACTION_CATALOG, type PlaybookActionType } from "@/domain/playbooks/catalog";
 import { SITUATION_LABELS } from "@/domain/command/brief";
 import type { Situation } from "@/domain/command/brief";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor, effectivePackageTier } from "@/domain/packaging/preview";
+import { isIncluded } from "@/domain/packaging/catalog";
 
 const SEV_TONE = { critical: "danger", high: "warn", medium: "info" } as const;
 const CHANNEL_LABELS: Record<string, string> = { in_app: "In-app", email: "Email", webhook: "Webhook" };
@@ -37,6 +40,11 @@ const drawerSpan = { fontWeight: 600, color: "var(--muted)" } as const;
 export default async function PlaybooksPage(): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("playbooks");
+  if (fenced) return <PackageFence feature="playbooks" previewTier={fenced} />;
+  // Growth runs playbooks recommend-only; automatic execution, webhooks, and
+  // scheduled runs are Enterprise.
+  const autoPlaybooks = isIncluded(await effectivePackageTier(), "playbooks_auto");
 
   const [rules, runs, members] = await Promise.all([
     loadPlaybooks(identity),
@@ -53,9 +61,16 @@ export default async function PlaybooksPage(): Promise<ReactNode> {
       <PageHeader
         title="Playbooks"
         subtitle="Turn the cross-domain signal queue into action — rules that create tasks, route deals, approve within a cap, generate reports, or notify. ACE can't act on signals it can't see."
-        actions={<NewPlaybookDrawer members={members} />}
+        actions={<NewPlaybookDrawer members={members} showWebhook={autoPlaybooks} />}
       />
-      <PlaybooksNav />
+      <PlaybooksNav showChannels={autoPlaybooks} />
+
+      {!autoPlaybooks && (
+        <Callout tone="info" title="Playbooks run recommend-only in Growth">
+          Rules surface their move for a human to approve. Automatic execution, webhook delivery, and
+          scheduled runs are part of the Enterprise package.
+        </Callout>
+      )}
 
       <MetricStrip>
         <MetricCard label="Active rules" value={String(active)} sub={`${rules.length} total`} />

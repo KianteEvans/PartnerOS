@@ -16,6 +16,7 @@ import { RingGauge } from "@/components/ui/RingGauge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { IconPrograms, IconPortfolio, IconMdf } from "@/components/ui/icons";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { SearchForm } from "@/components/ui/SearchForm";
 import { SavedViewsBar } from "@/components/ui/SavedViewsBar";
@@ -74,16 +75,6 @@ const PORTFOLIO_SORT_DIR: Record<string, "asc" | "desc"> = {
   status: "asc",
   readiness: "desc",
 };
-
-function RoiMetric({ label, value, accent }: { label: string; value: string; accent?: "ok" | "info" }): ReactNode {
-  const color = accent === "ok" ? "var(--ok)" : accent === "info" ? "var(--info)" : "var(--text)";
-  return (
-    <Card compact>
-      <div style={{ fontSize: 22, fontWeight: 700, color, fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>{value}</div>
-      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{label}</div>
-    </Card>
-  );
-}
 
 export default async function ProgramsPage({
   searchParams,
@@ -500,13 +491,13 @@ function RoiView({
   const withWins = rollup.byProgram.filter((p) => p.wonTCV > 0);
   return (
     <div style={{ display: "grid", gap: 18 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-        <RoiMetric label="Competencies" value={String(rollup.programs)} />
-        <RoiMetric label="Attributed deals" value={String(rollup.attributedCount)} />
-        <RoiMetric label="Open pipeline" value={money(rollup.openTCV)} accent="info" />
-        <RoiMetric label="Won TCV" value={money(rollup.wonTCV)} accent="ok" />
-        <RoiMetric label="Won since achieved" value={money(rollup.influencedWonTCV)} accent="ok" />
-      </div>
+      <MetricStrip>
+        <MetricCard label="Competencies" value={String(rollup.programs)} icon={<IconPrograms size={15} />} />
+        <MetricCard label="Attributed deals" value={String(rollup.attributedCount)} icon={<IconPortfolio size={15} />} />
+        <MetricCard label="Open pipeline" value={money(rollup.openTCV)} tone="info" icon={<IconPortfolio size={15} />} />
+        <MetricCard label="Won TCV" value={money(rollup.wonTCV)} tone="ok" icon={<IconMdf size={15} />} size="lg" />
+        <MetricCard label="Won since achieved" value={money(rollup.influencedWonTCV)} tone="ok" icon={<IconMdf size={15} />} />
+      </MetricStrip>
 
       <Panel title="Won TCV by Competency">
         {withWins.length === 0 ? (

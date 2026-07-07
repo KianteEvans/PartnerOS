@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { isPathIncluded, type PackageTier } from "@/domain/packaging/catalog";
 
 /**
  * Global footer. Sits at the bottom of the content column (which is a flex
  * column), so on short pages it anchors to the viewport bottom instead of
- * leaving the page feeling unfinished. Quick links point at real in-app routes.
+ * leaving the page feeling unfinished. Quick links point at real in-app routes,
+ * and drop out of a package preview when their section is fenced.
  */
-export function Footer({ year }: { year: number }): ReactNode {
+export function Footer({ year, previewTier = null }: { year: number; previewTier?: PackageTier | null }): ReactNode {
   return (
     <footer
       style={{
@@ -28,9 +30,11 @@ export function Footer({ year }: { year: number }): ReactNode {
         <Link href="/command" className="foot-link" style={footLink}>
           Command Center
         </Link>
-        <Link href="/reports" className="foot-link" style={footLink}>
-          Reports
-        </Link>
+        {isPathIncluded(previewTier, "/reports") && (
+          <Link href="/reports" className="foot-link" style={footLink}>
+            Reports
+          </Link>
+        )}
         <Link href="/settings" className="foot-link" style={footLink}>
           Settings
         </Link>

@@ -21,7 +21,7 @@ export function Sparkline({
   const points = sparklinePoints(values, width, height);
   const gid = `sl-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true" style={{ display: "block", flexShrink: 1, minWidth: 0, maxWidth: width }}>
       <defs>
         <linearGradient id={`${gid}-line`} x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" style={{ stopColor: color }} />

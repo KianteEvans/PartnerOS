@@ -35,6 +35,8 @@ import {
   type ReportHealthBand,
 } from "@/domain/reports/metrics";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const BAND_COLOR: Record<ReportHealthBand, string> = {
@@ -58,6 +60,8 @@ export default async function ReportDetailPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("reports");
+  if (fenced) return <PackageFence feature="reports" previewTier={fenced} />;
   const canApprove = can(identity.role, "report:approve");
   const canUpdate = can(identity.role, "report:update");
 

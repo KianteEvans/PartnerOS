@@ -36,6 +36,8 @@ import {
 import { parseListParams, listHref, pageCount } from "@/domain/list";
 import { listingView, LISTING_SORT_KEYS } from "@/domain/marketplace/listing-view";
 import { formLabel as labelStyle, formControl as control } from "@/components/ui/form-styles";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 export default async function MarketplacePage({
@@ -45,6 +47,8 @@ export default async function MarketplacePage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
 
   const today = new Date().toISOString().slice(0, 10);
   const nowMs = Date.now();

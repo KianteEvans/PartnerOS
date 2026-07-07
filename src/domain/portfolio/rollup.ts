@@ -15,6 +15,8 @@ export interface WorkspaceSummary {
   readonly name: string;
   readonly slug: string;
   readonly tier: string;
+  /** Service-package entitlement ("essentials" | "growth" | "enterprise"). */
+  readonly plan: string;
   /** Partnership health 0-100 + its band ("strong" | "fair" | "at_risk"). */
   readonly health: number;
   readonly band: string;

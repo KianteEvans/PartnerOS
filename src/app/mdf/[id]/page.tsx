@@ -34,6 +34,8 @@ import { MdfLifecycleStepper } from "@/app/mdf/MdfLifecycleStepper";
 import { activityByKey, APPROVED_ACTIVITIES, INELIGIBLE_ACTIVITIES } from "@/domain/mdf/activity-catalog";
 import { coFunding, derivedDeadlines, complianceChecks } from "@/domain/mdf/compliance";
 import { moneyOrDash as money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 const SECTION = "var(--section-accent)";
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -62,6 +64,8 @@ export default async function MdfDetailPage({
   const { id } = await params;
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("mdf");
+  if (fenced) return <PackageFence feature="mdf" previewTier={fenced} />;
   const canApprove = can(identity.role, "mdf:approve");
 
   const data = await withTenant(identity, async (tx) => {

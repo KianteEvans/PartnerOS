@@ -1,0 +1,25 @@
+version: 2
+
+# Scheduled dependency-update PRs. Version updates run on any repo (no GitHub
+# Advanced Security required); grouped so a week's bumps arrive as one PR each
+# instead of a flood. Security updates additionally require Dependabot alerts +
+# the Dependency Graph to be enabled in repo settings.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

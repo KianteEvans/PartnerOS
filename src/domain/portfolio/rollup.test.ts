@@ -7,6 +7,7 @@ function ws(over: Partial<WorkspaceSummary>): WorkspaceSummary {
     name: over.name ?? "Workspace",
     slug: over.slug ?? "ws",
     tier: over.tier ?? "select",
+    plan: over.plan ?? "essentials",
     health: over.health ?? 70,
     band: over.band ?? "fair",
     openWork: over.openWork ?? 0,

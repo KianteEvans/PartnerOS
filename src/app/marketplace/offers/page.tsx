@@ -17,6 +17,8 @@ import { loadPrivateOffers, loadOfferFormOptions } from "@/domain/marketplace/of
 import { setPrivateOfferStatus } from "@/domain/marketplace/offer-actions";
 import { offerSummary, PRIVATE_OFFER_STATUS_LABELS, isOpen } from "@/domain/marketplace/private-offers";
 import { money } from "@/domain/format";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 
 const TONE = (s: string): "ok" | "info" | "danger" =>
@@ -29,6 +31,8 @@ export default async function OffersPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("marketplace");
+  if (fenced) return <PackageFence feature="marketplace" previewTier={fenced} />;
   const sp = await searchParams;
   // Deep-link preselect: Deal Desk's offer moves arrive with ?opp=<opportunity id>.
   const defaultOppId = typeof sp.opp === "string" ? sp.opp : "";

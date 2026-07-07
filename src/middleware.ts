@@ -38,6 +38,9 @@ export function middleware(request: NextRequest): NextResponse {
   ].join("; ");
 
   const requestHeaders = new Headers(request.headers);
+  // Expose the path to server components (App Router gives no server-side pathname
+  // API) so shared primitives can scope their per-user collapse keys by section.
+  requestHeaders.set("x-pathname", request.nextUrl.pathname);
   // Only expose the nonce in production; in dev the relaxed CSP needs none and a
   // present nonce would re-introduce the hydration mismatch.
   if (isProd) requestHeaders.set("x-nonce", nonce);

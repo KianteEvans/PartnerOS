@@ -18,6 +18,12 @@ import {
   auditWhere,
   parseAuditFilters,
 } from "@/domain/audit/query";
+import {
+  collectOperatorRefs,
+  formatAttribution,
+  operatorRefFromMetadata,
+} from "@/domain/audit/attribution";
+import { loadAttribution } from "@/domain/audit/attribution-load";
 
 const labelStyle = { display: "grid", gap: 4, fontSize: 12 } as const;
 const spanStyle = { color: "var(--muted)" } as const;
@@ -37,6 +43,7 @@ interface Row {
   resourceId: string | null;
   actorUserId: string | null;
   createdAt: Date;
+  metadata: unknown;
 }
 
 export default async function AuditPage({
@@ -64,6 +71,7 @@ export default async function AuditPage({
         resourceId: auditLog.resourceId,
         actorUserId: auditLog.actorUserId,
         createdAt: auditLog.createdAt,
+        metadata: auditLog.metadata,
       })
       .from(auditLog)
       .where(where)
@@ -101,6 +109,10 @@ export default async function AuditPage({
   });
 
   const emailById = new Map(data.members.map((m) => [m.id, m.email]));
+  // Resolve agency act-as attribution (cross-tenant) for any delegated rows on
+  // this page, so the trail shows WHICH agency operator acted, not just the
+  // synthetic service user.
+  const attribution = await loadAttribution(collectOperatorRefs(data.rows.map((r) => r.metadata)));
   const totalPages = Math.max(1, Math.ceil(data.total / AUDIT_PAGE_SIZE));
   const qs = auditQueryString(filters);
   const pageHref = (p: number): string => `/settings/audit?${qs ? `${qs}&` : ""}page=${p}`;
@@ -224,7 +236,21 @@ export default async function AuditPage({
             {
               key: "actor",
               header: "Actor",
-              render: (r) => (r.actorUserId ? emailById.get(r.actorUserId) ?? "—" : "system"),
+              render: (r) => {
+                const base = r.actorUserId ? emailById.get(r.actorUserId) ?? "—" : "system";
+                const ref = operatorRefFromMetadata(r.metadata);
+                if (!ref) return base;
+                const label = formatAttribution(
+                  attribution.operatorEmailById.get(ref.operatorId),
+                  attribution.agencyNameById.get(ref.agencyId),
+                );
+                return (
+                  <div style={{ display: "grid", gap: 2 }}>
+                    <span>{base}</span>
+                    <span style={{ fontSize: 11, color: "var(--muted)" }}>· {label}</span>
+                  </div>
+                );
+              },
             },
             {
               key: "action",

@@ -14,6 +14,8 @@ import { loadAttributionExtra } from "@/domain/graph/graph-load";
 import { layoutGraph } from "@/domain/graph/layout";
 import { PartnershipGraph } from "@/app/command/graph/PartnershipGraph";
 import type { PartnershipGraph as GraphModel } from "@/domain/graph/types";
+import { PackageFence } from "@/components/ui/PackageFence";
+import { packageFenceFor } from "@/domain/packaging/preview";
 
 /**
  * The Partnership Map — the capstone cross-domain surface. Two views on one graph:
@@ -30,6 +32,8 @@ export default async function GraphPage({
 }): Promise<ReactNode> {
   const identity = await tryGetServerIdentity();
   if (!identity) redirect("/");
+  const fenced = await packageFenceFor("command_graph");
+  if (fenced) return <PackageFence feature="command_graph" previewTier={fenced} />;
 
   const { view: viewParam } = await searchParams;
   const view: "causal" | "attribution" = viewParam === "attribution" ? "attribution" : "causal";

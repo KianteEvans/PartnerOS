@@ -7,8 +7,11 @@ import { Panel } from "@/components/ui/Panel";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { MetricCard } from "@/components/ui/MetricCard";
+import { MetricStrip } from "@/components/ui/MetricStrip";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { IconTasks, IconClock, IconPrograms, IconTiers } from "@/components/ui/icons";
 import { loadManagedWorkspace } from "@/domain/portfolio/load";
+import { mkTrend } from "@/domain/trend";
 
 const BAND_TONE: Record<string, Tone> = { strong: "ok", fair: "warn", at_risk: "danger" };
 const BAND_COLOR: Record<string, string> = {
@@ -38,7 +41,7 @@ export default async function ManagedWorkspacePage({
   const { id } = await params;
   const view = await loadManagedWorkspace(identity, id);
   if (!view) redirect("/portfolio"); // not an agency, or not managed by this agency
-  const { meta, cc } = view;
+  const { meta, cc, trends } = view;
 
   const openButton = (
     <form method="post" action="/api/portfolio/switch" style={{ margin: 0 }}>
@@ -87,33 +90,31 @@ export default async function ManagedWorkspacePage({
           <RingGauge value={cc.health.score} color={BAND_COLOR[cc.health.band] ?? "var(--accent-2)"} size={110} />
           <Badge tone={BAND_TONE[cc.health.band] ?? "neutral"}>{cc.health.band.replace("_", " ")}</Badge>
         </div>
-        <div
-          style={{
-            flex: 1,
-            minWidth: 244,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-            gap: 12,
-          }}
-        >
-          <MetricCard label="Open work" value={String(cc.work.open)} sub="tasks in flight" />
+        <MetricStrip min={140} style={{ flex: 1, minWidth: 244 }}>
+          <MetricCard label="Open work" value={String(cc.work.open)} sub="tasks in flight" icon={<IconTasks size={15} />} trend={mkTrend(trends.openWork)} />
           <MetricCard
             label="Overdue"
             value={String(cc.work.overdue)}
             tone={cc.work.overdue > 0 ? "danger" : "neutral"}
             tint={cc.work.overdue > 0 ? "danger" : undefined}
+            icon={<IconClock size={15} />}
+            trend={mkTrend(trends.overdue, { invert: true })}
           />
           <MetricCard
             label="Active programs"
             value={`${cc.progress.programsActive}/${cc.progress.programsTotal}`}
             sub="competencies & tiers"
+            icon={<IconPrograms size={15} />}
+            trend={mkTrend(trends.activePrograms)}
           />
           <MetricCard
             label="Tier progress"
             value={cc.progress.tierPercent == null ? "—" : `${cc.progress.tierPercent}%`}
             sub="to next tier"
+            icon={<IconTiers size={15} />}
+            trend={cc.progress.tierPercent == null ? undefined : mkTrend(trends.tierProgress, { suffix: "%" })}
           />
-        </div>
+        </MetricStrip>
       </section>
 
       <Panel title="Needs attention">
