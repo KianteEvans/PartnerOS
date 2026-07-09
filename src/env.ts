@@ -107,6 +107,11 @@ const base = z.object({
   // it never blocks boot. Benchmarks still render in dev from seeded cohorts.
   BENCHMARK_AGGREGATOR_TOKEN: z.string().min(1).optional().or(z.literal("")),
 
+  // Optional. Error-report webhook: error-level structured log events are
+  // POSTed here (fire-and-forget) so a Sentry-style collector can be attached
+  // without an SDK dependency. Unset/empty => stdout JSON logging only.
+  ERROR_REPORT_URL: z.string().url().optional().or(z.literal("")),
+
   // Optional. Bearer token gating the read-only BD-lead export feed
   // (/api/integrations/bd-leads) that the standalone BDAgent app pulls inbound
   // "Book a demo" leads from. Unset/empty => the endpoint returns 401.
@@ -155,6 +160,16 @@ function assertProductionInvariants(data: Base): void {
       "FATAL: production requires real adapters. Missing/empty: " +
         missing.join(", ") +
         ". Set PARTNEROS_LOCAL_DEV=true only on a developer machine.",
+    );
+  }
+  // The strict CSP (nonce + strict-dynamic in middleware.ts) and other
+  // NODE_ENV-keyed hardening only engage when NODE_ENV is exactly
+  // "production". A deployed runtime with any other value would silently serve
+  // the relaxed dev CSP -- refuse to start instead.
+  if (isDeployedEnvironment() && process.env.NODE_ENV !== "production") {
+    throw new Error(
+      "FATAL: deployed environment detected but NODE_ENV is not 'production'. " +
+        "CSP and cookie hardening key off NODE_ENV. Set NODE_ENV=production.",
     );
   }
 }

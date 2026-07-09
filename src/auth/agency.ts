@@ -66,6 +66,18 @@ export async function ensureAgencyServiceUser(
   agencyTid: string,
   childTid: string,
 ): Promise<ServiceUser> {
+  // Fail-closed: re-verify the management link INSIDE the caller's transaction, so a
+  // concurrent unlink between a route-level check and this mint can never produce a
+  // service user (and therefore an act-as session) for a workspace the agency no
+  // longer manages (TOCTOU).
+  const [child] = await tx
+    .select({ agencyId: tenants.agencyId })
+    .from(tenants)
+    .where(eq(tenants.id, childTid))
+    .limit(1);
+  if (!child || child.agencyId !== agencyTid) {
+    throw new ForbiddenError("Workspace is not managed by this agency");
+  }
   const sub = agencySubject(agencyTid);
   const [existing] = await tx
     .select({ id: users.id, epoch: users.sessionEpoch })

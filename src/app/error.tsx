@@ -48,8 +48,9 @@ export default function Error({
   reset: () => void;
 }): ReactNode {
   useEffect(() => {
-    // In production this is where an observability hook (CloudWatch, Sentry)
-    // would report the error; for now it surfaces in the server/browser console.
+    // Server-side capture happens globally in src/instrumentation.ts
+    // (onRequestError) as a structured JSON line keyed by the same digest shown
+    // below -- this client log is just the local echo in the browser console.
     console.error("Route error boundary:", error);
   }, [error]);
 

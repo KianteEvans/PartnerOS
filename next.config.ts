@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Self-contained server bundle (.next/standalone) consumed by the Dockerfile;
+  // explicit so the deployment contract is visible here, not implied.
+  output: "standalone",
   // node-saml / xml-crypto / @xmldom use dynamic requires that Next's bundler
   // mangles; keep them external so the SAML routes load them at runtime (Node).
   serverExternalPackages: ["@node-saml/node-saml", "xml-crypto", "@xmldom/xmldom"],

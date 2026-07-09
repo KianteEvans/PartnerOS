@@ -3,6 +3,7 @@ import { tryGetServerIdentity, signSession, setSessionCookie } from "@/auth/sess
 import { can } from "@/authz/permissions";
 import { withSystem } from "@/db/client";
 import { loadTenantMeta, ensureAgencyServiceUser } from "@/auth/agency";
+import { ForbiddenError } from "@/http/errors";
 
 /**
  * Portfolio "act as" switch (Bet C). An agency operator POSTs a managed workspace id;
@@ -29,13 +30,22 @@ export async function POST(req: Request): Promise<Response> {
   const targetId = String(form.get("tenantId") ?? "");
   if (!targetId) return new NextResponse("Missing tenantId", { status: 400 });
 
-  // The security boundary: the target must be managed by THIS agency.
+  // The security boundary: the target must be managed by THIS agency. This check
+  // gives the friendly 403; the AUTHORITATIVE check is re-run inside the same
+  // transaction that mints the service user (ensureAgencyServiceUser), so a
+  // concurrent unlink cannot slip a stale link past us (TOCTOU).
   const target = await loadTenantMeta(targetId);
   if (!target || target.agencyId !== identity.tenantId) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  const svc = await withSystem((tx) => ensureAgencyServiceUser(tx, identity.tenantId, targetId));
+  let svc;
+  try {
+    svc = await withSystem((tx) => ensureAgencyServiceUser(tx, identity.tenantId, targetId));
+  } catch (err) {
+    if (err instanceof ForbiddenError) return new NextResponse("Forbidden", { status: 403 });
+    throw err;
+  }
   const token = await signSession({
     tid: targetId,
     uid: svc.id,

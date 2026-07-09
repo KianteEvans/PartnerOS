@@ -10,10 +10,12 @@ import type { Permission } from "@/authz/permissions";
 import { mutationRateLimiter } from "@/redis/ratelimit";
 import type { RateLimiter } from "@/redis/ratelimit";
 import {
+  AppError,
   IdempotencyConflictError,
   PayloadTooLargeError,
   RateLimitedError,
 } from "@/http/errors";
+import { log } from "@/observability/logger";
 
 /**
  * THE single gate every mutation passes through (Rule 6). In one place it
@@ -193,5 +195,18 @@ export async function runMutation<T>(
       );
 
     return { status: 200, body: result, replayed: false };
+  }).catch((err: unknown) => {
+    // Typed AppErrors are expected control flow (the action layer maps them to
+    // form state). Anything else is a real bug: emit one structured error line
+    // with enough context to find it, then rethrow unchanged.
+    if (!(err instanceof AppError)) {
+      log.error("mutation.unhandled", {
+        action: spec.action,
+        resourceType: spec.resourceType,
+        tenantId: identity.tenantId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
   });
 }

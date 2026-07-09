@@ -4,6 +4,7 @@ import { getOidcProvider } from "@/auth/oidc";
 import { resolveOrProvisionUser } from "@/auth/provision";
 import { signSession, setSessionCookie } from "@/auth/session";
 import { AppError } from "@/http/errors";
+import { log } from "@/observability/logger";
 
 export async function GET(req: Request): Promise<NextResponse> {
   const url = new URL(req.url);
@@ -39,7 +40,10 @@ export async function GET(req: Request): Promise<NextResponse> {
     // A 500 here is a real bug (not a rejected login); surface it server-side
     // instead of swallowing it behind the generic message.
     if (status >= 500) {
-      console.error("[auth/callback] unexpected login failure:", err);
+      log.error("auth.callback_failure", {
+        message: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? (err.stack ?? null) : null,
+      });
     }
     return new NextResponse(message, { status });
   }
