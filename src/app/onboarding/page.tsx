@@ -37,6 +37,7 @@ import {
 } from "@/domain/onboarding/catalog";
 import { PRESET_LABELS } from "@/domain/assessments/catalog";
 import { formLabel as labelStyle, formLabelSpan as spanStyle, formControl as controlStyle } from "@/components/ui/form-styles";
+import { IconOnboarding } from "@/components/ui/icons";
 
 
 type Row = typeof onboarding.$inferSelect;
@@ -77,7 +78,7 @@ export default async function OnboardingPage(): Promise<ReactNode> {
 
 function Welcome({ canManage }: { canManage: boolean }): ReactNode {
   return (
-    <Panel title="Welcome to PartnerOS">
+    <Panel title="Welcome to PartnerOS" accent="var(--section-accent)" icon={<IconOnboarding size={16} />}>
       <p style={{ color: "var(--muted)", marginTop: 0 }}>
         PartnerOS turns fragmented partner data into prioritized decisions,
         approval-gated work, and executive-ready reporting. The operating loop:
@@ -203,7 +204,10 @@ function StepBody({
 
   if (step === "context") {
     return (
-      <Panel title="Tell us about your company">
+      <Panel title="Tell us about your company" accent="var(--section-accent)" icon={<IconOnboarding size={16} />}>
+        <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
+          A few basics so PartnerOS can tailor recommendations to your business.
+        </p>
         <MutationForm action={saveContext} submitLabel="Continue">
           <label style={labelStyle}>
             <span style={spanStyle}>Company name</span>
@@ -228,7 +232,7 @@ function StepBody({
   if (step === "objectives") {
     const chosen = new Set((row.objectives as string[]) ?? []);
     return (
-      <Panel title="What are your partnership objectives?">
+      <Panel title="What are your partnership objectives?" accent="var(--section-accent)" icon={<IconOnboarding size={16} />}>
         <p style={{ ...helpStyle, margin: "0 0 10px" }}>{FIELD_HELP.objectives}</p>
         <MutationForm action={saveObjectives} submitLabel="Continue">
           <div style={{ display: "grid", gap: 10 }}>
@@ -254,7 +258,7 @@ function StepBody({
 
   if (step === "path") {
     return (
-      <Panel title="Choose a guided path">
+      <Panel title="Choose a guided path" accent="var(--section-accent)" icon={<IconOnboarding size={16} />}>
         <p style={{ ...helpStyle, margin: "0 0 10px" }}>{FIELD_HELP.path}</p>
         <MutationForm action={choosePath} submitLabel="Continue">
           <div style={{ display: "grid", gap: 12 }}>
@@ -300,7 +304,7 @@ function StepBody({
     ((row.objectives as string[]) ?? []).includes(o.key),
   ).map((o) => o.label);
   return (
-    <Panel title="Review & unlock">
+    <Panel title="Review & unlock" accent="var(--section-accent)" icon={<IconOnboarding size={16} />}>
       <dl style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, fontSize: 14 }}>
         <dt style={spanStyle}>Company</dt>
         <dd style={{ margin: 0 }}>{row.companyName ?? "—"}</dd>

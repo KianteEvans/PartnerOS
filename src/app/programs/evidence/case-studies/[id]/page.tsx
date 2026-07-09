@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { DraftCaseStudy } from "@/components/ui/DraftCaseStudy";
+import { IconCaseStudies } from "@/components/ui/icons";
 import { updateCaseStudy } from "@/domain/case-studies/actions";
 import { loadCaseStudyDetail, loadEvidenceOptions } from "@/domain/case-studies/load";
 import { CASE_STUDY_ASPECTS } from "@/domain/case-studies/aspects";
@@ -112,7 +113,7 @@ export default async function CaseStudyDetailPage({
         actions={editDrawer}
       />
 
-      <Panel title="Narrative" actions={<DraftCaseStudy caseStudyId={cs.id} enabled={aiEnabled} />}>
+      <Panel title="Narrative" accent="var(--section-accent)" icon={<IconCaseStudies size={16} />} actions={<DraftCaseStudy caseStudyId={cs.id} enabled={aiEnabled} />}>
         <div style={{ display: "grid", gap: 14 }}>
           {CASE_STUDY_ASPECTS.map((a) => (
             <div key={a.key}>

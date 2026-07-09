@@ -18,6 +18,9 @@ import { MutationForm } from "@/components/ui/MutationForm";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { RingGauge } from "@/components/ui/RingGauge";
+import { ChipList } from "@/components/ui/ChipList";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { IconAssessments } from "@/components/ui/icons";
 import { MetricCard, type MetricTrend } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { DeltaChip } from "@/components/ui/DeltaChip";
@@ -219,7 +222,7 @@ export default async function AssessmentDetailPage({
 
       {assessment.status === "draft" ? (
         <>
-          <Panel title="Answer the questions">
+          <Panel title="Answer the questions" accent="var(--section-accent)" icon={<IconAssessments size={16} />}>
             <MutationForm
               action={saveResponses}
               submitLabel="Save answers"
@@ -237,7 +240,7 @@ export default async function AssessmentDetailPage({
             </MutationForm>
           </Panel>
 
-          <Panel title="Submit for scoring">
+          <Panel title="Submit for scoring" accent="var(--section-accent)" icon={<IconAssessments size={16} />}>
             <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
               Submitting scores every in-scope module, generates approval-gated
               recommendations, and locks the assessment. Save your answers first.
@@ -364,7 +367,7 @@ function ScoredResults({
         </div>
       </section>
 
-      <Panel title="Module scores">
+      <Panel title="Module scores" accent="var(--section-accent)">
         <div style={{ display: "grid", gap: 10 }}>
           {scored.map((m) => (
             <ModuleRow
@@ -383,22 +386,18 @@ function ScoredResults({
       </Panel>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-        <Panel title={`Strengths (${strengths.length})`}>
-          {strengths.length === 0 ? (
-            <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>No modules at {STRENGTH_THRESHOLD}+ yet.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 8 }}>
-              {strengths.map((m) => (
-                <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-                  <span>{MODULE_LABELS[m]}</span>
-                  <Badge tone="ok">{scoreByModule.get(m)}/100</Badge>
-                </div>
-              ))}
-            </div>
-          )}
+        <Panel title={`Strengths (${strengths.length})`} accent="var(--section-accent)">
+          <ChipList
+            items={strengths.map((m) => ({
+              key: m,
+              label: MODULE_LABELS[m],
+              badges: <Badge tone="ok">{scoreByModule.get(m)}/100</Badge>,
+            }))}
+            empty={<p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>No modules at {STRENGTH_THRESHOLD}+ yet.</p>}
+          />
         </Panel>
 
-        <Panel title={`Gaps (${gaps.length})`}>
+        <Panel title={`Gaps (${gaps.length})`} accent="var(--section-accent)">
           {gaps.length === 0 ? (
             <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>No gaps — every module is at {GAP_THRESHOLD}+.</p>
           ) : (
@@ -426,7 +425,7 @@ function ScoredResults({
       </div>
 
       {grounding && (
-        <Panel title="What this maps to">
+        <Panel title="What this maps to" accent="var(--section-accent)" icon={<IconAssessments size={16} />}>
           <p style={{ margin: "0 0 8px", fontSize: 13, color: "var(--muted)" }}>{grounding.heading}:</p>
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13 }}>
             {grounding.items.map((it, i) => (
@@ -447,6 +446,7 @@ function ScoredResults({
 
       <Panel
         title={`Recommendations (${recs.length})`}
+        accent="var(--section-accent)"
         actions={
           pendingCount > 0 ? (
             <MutationForm
@@ -459,7 +459,7 @@ function ScoredResults({
         }
       >
         {recs.length === 0 ? (
-          <p style={{ color: "var(--muted)", margin: 0 }}>No recommendations were generated.</p>
+          <EmptyState title="No recommendations" hint="None were generated for this assessment." />
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
             {recs.map((rec) => (

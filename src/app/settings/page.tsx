@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { Callout } from "@/components/ui/Callout";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { isIncluded, PACKAGE_TIERS, PACKAGE_META } from "@/domain/packaging/catalog";
 import {
   getPackagePreview,
@@ -20,8 +21,9 @@ import {
   currentWorkspacePlan,
 } from "@/domain/packaging/preview";
 import { setPackagePreview } from "@/domain/packaging/preview-actions";
-import { RingGauge } from "@/components/ui/RingGauge";
+import { PreflightList } from "@/components/ui/PreflightList";
 import { BarChart } from "@/components/ui/BarChart";
+import { IconSettings } from "@/components/ui/icons";
 import { ActivityList } from "@/components/ui/ActivityList";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
@@ -225,7 +227,7 @@ export default async function SettingsPage({
           {active === "general" && (
             <>
               {canManage && (
-                <Panel title="Package preview" accent="var(--accent-2)">
+                <Panel title="Package preview" accent="var(--accent-2)" icon={<IconSettings size={16} />}>
                   <p style={{ fontSize: 13, marginTop: 0, marginBottom: 8 }}>
                     This workspace is on the{" "}
                     <strong style={{ color: "var(--accent-2)" }}>{PACKAGE_META[realPlan].label}</strong>{" "}
@@ -256,7 +258,10 @@ export default async function SettingsPage({
                 </Panel>
               )}
 
-              <Panel title="Workspace">
+              <Panel title="Workspace" accent="var(--section-accent)" icon={<IconSettings size={16} />}>
+                <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
+                  Your workspace name, automation mode, and notification defaults.
+                </p>
                 {canManage ? (
                   <MutationForm action={updateWorkspaceSettings} submitLabel="Save">
                     <label style={labelStyle}>
@@ -292,7 +297,7 @@ export default async function SettingsPage({
                 )}
               </Panel>
 
-              <Panel title="Benchmarking">
+              <Panel title="Benchmarking" accent="var(--section-accent)" icon={<IconSettings size={16} />}>
                 <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13, lineHeight: 1.5 }}>
                   Reciprocal and anonymized. When on, this workspace contributes its metrics to peer
                   cohorts (by tier and tenure) and unlocks the Benchmarks panel showing how you
@@ -387,7 +392,7 @@ export default async function SettingsPage({
               )}
 
               {showPlaybooks && (
-              <Panel title="Automation governance">
+              <Panel title="Automation governance" accent="var(--section-accent)">
                 <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>{AUTOMATION_MODE_DESCRIPTIONS[mode]}</p>
                 <div style={{ marginBottom: 14 }}>
                   <BarChart
@@ -414,7 +419,7 @@ export default async function SettingsPage({
 
           {active === "members" && (
             <>
-              <Panel title="Users & roles">
+              <Panel title="Users & roles" accent="var(--section-accent)">
                 <div style={{ display: "grid", gap: 10 }}>
                   {data.members.map((m) => (
                     <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -495,7 +500,7 @@ export default async function SettingsPage({
               </Panel>
 
               {canUsers && (
-                <Panel title="Invitations">
+                <Panel title="Invitations" accent="var(--section-accent)" icon={<IconSettings size={16} />}>
                   <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
                     Invite a teammate by email. They join this workspace with the chosen role
                     the first time they sign in with that address.
@@ -517,7 +522,7 @@ export default async function SettingsPage({
 
                   <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
                     {data.invites.length === 0 ? (
-                      <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>No pending invitations.</p>
+                      <EmptyState title="No pending invitations" hint="Invite a teammate above to add them to this workspace." />
                     ) : (
                       data.invites.map((inv) => (
                         <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--border)", paddingBottom: 6 }}>
@@ -541,7 +546,7 @@ export default async function SettingsPage({
           )}
 
           {active === "integrations" && canManage && !governance && (
-            <Panel title="Single sign-on & provisioning">
+            <Panel title="Single sign-on & provisioning" accent="var(--section-accent)">
               <Callout tone="info" title="SSO & SCIM are part of Enterprise">
                 SAML single sign-on and SCIM identity provisioning ship with the Enterprise package —
                 the tier where IT owns identity. Every other integration below stays available.
@@ -550,13 +555,13 @@ export default async function SettingsPage({
           )}
 
           {active === "integrations" && canManage && governance && (
-            <Panel title="Identity provisioning (SCIM)">
+            <Panel title="Identity provisioning (SCIM)" accent="var(--section-accent)">
               <ScimPanel enabled={data.sso?.scimEnabled ?? false} baseUrl={scimBase} />
             </Panel>
           )}
 
           {active === "integrations" && canManage && governance && (
-            <Panel title="SAML single sign-on">
+            <Panel title="SAML single sign-on" accent="var(--section-accent)">
               <SamlConfigPanel
                 config={{
                   enabled: data.sso?.samlEnabled ?? false,
@@ -570,7 +575,7 @@ export default async function SettingsPage({
           )}
 
           {active === "integrations" && canManage && (
-            <Panel title="AWS Partner Central">
+            <Panel title="AWS Partner Central" accent="var(--section-accent)">
               <AwsConnectionPanel
                 config={{
                   roleArn: data.aws?.roleArn ?? "",
@@ -587,7 +592,7 @@ export default async function SettingsPage({
           )}
 
           {active === "integrations" && canManage && (
-            <Panel title="AWS Marketplace">
+            <Panel title="AWS Marketplace" accent="var(--section-accent)">
               <MarketplaceConnectionPanel
                 config={{
                   roleArn: data.aws?.roleArn ?? "",
@@ -603,7 +608,7 @@ export default async function SettingsPage({
           )}
 
           {active === "integrations" && (
-            <Panel title="Integrations">
+            <Panel title="Integrations" accent="var(--section-accent)">
               <div style={{ display: "grid", gap: 14 }}>
                 {CONNECTOR_CATALOG.map((cat) => {
                   const c = connByKind.get(cat.kind);
@@ -645,40 +650,27 @@ export default async function SettingsPage({
           )}
 
           {active === "readiness" && (
-            <Panel title="Workspace readiness">
-              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
-                <RingGauge value={readiness.percent} color={readiness.launchReady ? "var(--ok)" : "var(--warn)"} caption="ready" size={104} />
-                <p style={{ color: readiness.launchReady ? "var(--ok)" : "var(--warn)", fontSize: 13, margin: 0, fontWeight: 600, minWidth: 180, flex: 1 }}>
-                  {readiness.launchReady ? "Launch-ready: all critical controls satisfied." : "Critical controls incomplete."}
-                </p>
-              </div>
-              <div style={{ display: "grid", gap: 4 }}>
-                {readiness.checks.map((c) => (
-                  <div key={c.key} style={{ fontSize: 13 }}>
-                    <span style={{ color: c.ok ? "var(--accent)" : "var(--danger)" }}>{c.ok ? "✓" : "✗"}</span> {c.label}
-                    {c.critical ? <span style={{ color: "var(--muted)", fontSize: 11 }}> · critical</span> : ""}
-                  </div>
-                ))}
-              </div>
-              {(() => {
-                const next = readiness.checks.find((c) => !c.ok);
-                if (!next) return null;
-                const href =
-                  next.key === "connector_live" ? "/settings?section=integrations" : "/settings?section=general";
-                return (
-                  <div style={{ marginTop: 14 }}>
-                    <Callout tone="info" title="Recommended next step">
-                      {next.label} isn&rsquo;t set yet.{" "}
-                      <a href={href} style={{ color: "var(--accent)", fontWeight: 600 }}>Configure →</a>
-                    </Callout>
-                  </div>
-                );
-              })()}
+            <Panel title="Workspace readiness" accent={readiness.launchReady ? "ok" : "warn"}>
+              <PreflightList
+                checks={readiness.checks}
+                summary={{
+                  percent: readiness.percent,
+                  ready: readiness.launchReady,
+                  readyText: "Launch-ready: all critical controls satisfied.",
+                  blockedText: "Critical controls incomplete.",
+                }}
+                {...(() => {
+                  const next = readiness.checks.find((c) => !c.ok);
+                  if (!next) return {};
+                  const href = next.key === "connector_live" ? "/settings?section=integrations" : "/settings?section=general";
+                  return { nextStep: { title: "Recommended next step", label: next.label, href } };
+                })()}
+              />
             </Panel>
           )}
 
           {active === "data" && canManage && (
-            <Panel title="Data & privacy">
+            <Panel title="Data & privacy" accent="var(--section-accent)">
               <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
                 Export a complete copy of this workspace&rsquo;s data (all sections,
                 users, and the audit trail) as a single JSON file — for portability,
@@ -711,6 +703,7 @@ export default async function SettingsPage({
           {active === "activity" && canAudit && (
             <Panel
               title="Recent activity"
+              accent="var(--section-accent)"
               actions={
                 <a href="/settings/audit" style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>
                   View full audit log →

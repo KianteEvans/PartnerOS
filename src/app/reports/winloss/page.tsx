@@ -83,7 +83,7 @@ export default async function WinLossPage({
             <MetricCard label="Avg cycle" icon={<IconClock size={15} />} value={o.avgCycleDays == null ? "—" : `${o.avgCycleDays}d`} sub="created → won" />
           </MetricStrip>
 
-          <Panel title="Explain" actions={null}>
+          <Panel title="Explain" accent="var(--section-accent)" actions={null}>
             <WinLossNarrative enabled={isWinLossAiEnabled()} />
           </Panel>
 
@@ -99,7 +99,7 @@ export default async function WinLossPage({
                 }))}
               />
             </Panel>
-            <Panel title="Why deals are lost">
+            <Panel title="Why deals are lost" accent="var(--section-accent)">
               {r.lossReasons.length === 0 ? (
                 <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
                   No loss reasons recorded yet — capture one when marking a deal lost.
@@ -158,11 +158,9 @@ export default async function WinLossPage({
             )}
           </Panel>
 
-          <Panel title="AWS relationships that win">
+          <Panel title="AWS relationships that win" accent="var(--section-accent)">
             {reps.length === 0 ? (
-              <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
-                No closed deals are attributed to an AWS relationship yet — link an AWS contact on your deals.
-              </p>
+              <EmptyState title="No AWS relationships attributed yet" hint="Link an AWS contact on your deals — closed deals attributed to a relationship show up here." />
             ) : (
               <>
                 <div style={{ overflowX: "auto" }}>
@@ -206,7 +204,7 @@ export default async function WinLossPage({
             )}
           </Panel>
 
-          <Panel title={`Closed deals (${deals.length})`}>
+          <Panel title={`Closed deals (${deals.length})`} accent="var(--section-accent)">
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
                 <thead>

@@ -476,7 +476,7 @@ export default async function MdfPage({
         )}
       </Panel>
 
-      <Panel title="Reconciliation funnel">
+      <Panel title="Reconciliation funnel" accent="var(--section-accent)">
         {/* Funnel: each lifecycle stage as a share of the total requested. */}
         <BarChart
           max={summary.requested}
@@ -526,7 +526,7 @@ export default async function MdfPage({
         current={{ view, ...(activity !== "all" ? { activity } : {}), q: params.q, sort: params.sort, dir: params.dir }}
       />
 
-      <Panel title={`Requests (${total})`}>
+      <Panel title={`Requests (${total})`} accent="var(--section-accent)">
         {canApprove ? (
           <BulkProvider allIds={pageRows.map((r) => r.id)}>
             {table}

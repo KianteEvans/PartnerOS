@@ -6,6 +6,9 @@ import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Panel } from "@/components/ui/Panel";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
+import { KeyValueRows } from "@/components/ui/KeyValueRows";
+import { ChipList } from "@/components/ui/ChipList";
+import { IconSolutions, IconClock, IconMarketplace, IconAce } from "@/components/ui/icons";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { and, desc, eq } from "drizzle-orm";
 import { withTenant } from "@/db/client";
@@ -200,6 +203,8 @@ export default async function SolutionDetailPage({
 
       <Panel
         title="Renewal readiness"
+        accent="var(--section-accent)"
+        icon={<IconClock size={16} />}
         actions={<Badge tone={bandTone(s.renewal.band)}>{RENEWAL_BAND_LABELS[s.renewal.band]}</Badge>}
       >
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
@@ -214,69 +219,29 @@ export default async function SolutionDetailPage({
             </span>
           )}
         </div>
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-          {s.renewal.criteria.map((c) => (
-            <li
-              key={c.key}
-              style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}
-            >
-              <div style={{ display: "grid", gap: 2 }}>
-                <span style={{ fontSize: 13 }}>{c.label}</span>
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>{c.detail}</span>
-              </div>
-              <Badge tone={c.ok ? "ok" : "warn"}>{c.ok ? "met" : "gap"}</Badge>
-            </li>
-          ))}
-        </ul>
+        <ChipList
+          items={s.renewal.criteria.map((c) => ({
+            key: c.key,
+            label: c.label,
+            detail: c.detail,
+            badges: <Badge tone={c.ok ? "ok" : "warn"}>{c.ok ? "met" : "gap"}</Badge>,
+          }))}
+        />
       </Panel>
 
-      <Panel title="Details">
-        <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 16px", margin: 0, fontSize: 13 }}>
-          <dt style={spanStyle}>FTR status</dt>
-          <dd style={{ margin: 0 }}>{ftrStatusLabel(s.ftrStatus)}</dd>
-          {s.programId && s.programName && (
-            <>
-              <dt style={spanStyle}>Program</dt>
-              <dd style={{ margin: 0 }}>
-                <Link href={`/programs/${s.programId}`} style={{ color: "var(--accent)", textDecoration: "none" }}>
-                  {s.programName}
-                </Link>
-              </dd>
-            </>
-          )}
-          {s.sellingProposition && (
-            <>
-              <dt style={spanStyle}>Selling proposition</dt>
-              <dd style={{ margin: 0 }}>{s.sellingProposition}</dd>
-            </>
-          )}
-          {s.description && (
-            <>
-              <dt style={spanStyle}>Description</dt>
-              <dd style={{ margin: 0, whiteSpace: "pre-wrap" }}>{s.description}</dd>
-            </>
-          )}
-          {s.url && (
-            <>
-              <dt style={spanStyle}>URL</dt>
-              <dd style={{ margin: 0 }}>
-                <a href={s.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                  {s.url}
-                </a>
-              </dd>
-            </>
-          )}
-          {s.marketplaceUrl && (
-            <>
-              <dt style={spanStyle}>Marketplace</dt>
-              <dd style={{ margin: 0 }}>
-                <a href={s.marketplaceUrl} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>
-                  {s.marketplaceUrl}
-                </a>
-              </dd>
-            </>
-          )}
-        </dl>
+      <Panel title="Details" accent="var(--section-accent)" icon={<IconSolutions size={16} />}>
+        <KeyValueRows
+          rows={[
+            { label: "FTR status", value: ftrStatusLabel(s.ftrStatus) },
+            ...(s.programId && s.programName
+              ? [{ label: "Program", value: <Link href={`/programs/${s.programId}`} style={{ color: "var(--section-accent)", textDecoration: "none" }}>{s.programName}</Link> }]
+              : []),
+            ...(s.sellingProposition ? [{ label: "Selling proposition", value: s.sellingProposition }] : []),
+            ...(s.description ? [{ label: "Description", value: <span style={{ whiteSpace: "pre-wrap" }}>{s.description}</span> }] : []),
+            ...(s.url ? [{ label: "URL", value: <a href={s.url} target="_blank" rel="noreferrer" style={{ color: "var(--section-accent)" }}>{s.url}</a> }] : []),
+            ...(s.marketplaceUrl ? [{ label: "Marketplace", value: <a href={s.marketplaceUrl} target="_blank" rel="noreferrer" style={{ color: "var(--section-accent)" }}>{s.marketplaceUrl}</a> }] : []),
+          ]}
+        />
         {!s.sellingProposition && !s.description && !s.url && !s.marketplaceUrl && (
           <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--muted)" }}>
             Add a description, selling proposition, and URLs with Edit Solution.
@@ -287,53 +252,51 @@ export default async function SolutionDetailPage({
       {marketplaceListingRows.length > 0 && (
         <Panel
           title={`AWS Marketplace ${marketplaceListingRows.length === 1 ? "listing" : "listings"} (${marketplaceListingRows.length})`}
+          accent="var(--section-accent)"
+          icon={<IconMarketplace size={16} />}
         >
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-            {marketplaceListingRows.map((l) => (
-              <li
-                key={l.id}
-                style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <Link href={`/marketplace/${l.id}`} style={{ fontSize: 13, color: "var(--accent)", textDecoration: "none" }}>
-                  {l.title}
-                </Link>
+          <ChipList
+            items={marketplaceListingRows.map((l) => ({
+              key: l.id,
+              label: l.title,
+              href: `/marketplace/${l.id}`,
+              badges: (
                 <Badge tone={listingStatusTone(l.status as MarketplaceListingStatusId)}>
                   {LISTING_STATUS_LABELS[l.status as MarketplaceListingStatusId]}
                 </Badge>
-              </li>
-            ))}
-          </ul>
+              ),
+            }))}
+          />
         </Panel>
       )}
 
-      <Panel title={`Linked ACE opportunities (${s.opportunities.length})`}>
-        {s.opportunities.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
-            No opportunities linked yet. Link this Solution from an opportunity&apos;s Edit drawer in{" "}
-            <Link href="/ace" style={{ color: "var(--accent)", textDecoration: "none" }}>
-              ACE Pipeline
-            </Link>{" "}
-            — launched ones in the last 12 months count toward renewal.
-          </p>
-        ) : (
-          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
-            {s.opportunities.map((o) => (
-              <li
-                key={o.id}
-                style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}
-              >
-                <span style={{ fontSize: 13 }}>
-                  {o.name} <span style={{ color: "var(--muted)" }}>· {money(o.amount)}</span>
-                  {o.closeDate ? <span style={{ color: "var(--muted)" }}> · {o.closeDate}</span> : null}
-                </span>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>
-                  {o.launched && <Badge tone="ok">counts (12mo)</Badge>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+      <Panel title={`Linked ACE opportunities (${s.opportunities.length})`} accent="var(--section-accent)" icon={<IconAce size={16} />}>
+        <ChipList
+          items={s.opportunities.map((o) => ({
+            key: o.id,
+            label: (
+              <>
+                {o.name} <span style={{ color: "var(--muted)" }}>· {money(o.amount)}</span>
+                {o.closeDate ? <span style={{ color: "var(--muted)" }}> · {o.closeDate}</span> : null}
+              </>
+            ),
+            badges: (
+              <>
+                <Badge tone={statusTone(o.stage)}>{o.stage}</Badge>
+                {o.launched ? <Badge tone="ok">counts (12mo)</Badge> : null}
+              </>
+            ),
+          }))}
+          empty={
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+              No opportunities linked yet. Link this Solution from an opportunity&apos;s Edit drawer in{" "}
+              <Link href="/ace" style={{ color: "var(--section-accent)", textDecoration: "none" }}>
+                ACE Pipeline
+              </Link>{" "}
+              — launched ones in the last 12 months count toward renewal.
+            </p>
+          }
+        />
       </Panel>
     </PageShell>
   );

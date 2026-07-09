@@ -147,7 +147,7 @@ export default async function AuditPage({
       </MetricStrip>
 
       {data.perDay.length > 0 && (
-        <Panel title="Activity over time (30 days)">
+        <Panel title="Activity over time (30 days)" accent="var(--section-accent)">
           <BarChart
             formatValue={(n) => String(n)}
             data={data.perDay.map((d) => ({ label: String(d.day).slice(5), value: Number(d.n), color: "var(--accent-2)" }))}
@@ -155,7 +155,7 @@ export default async function AuditPage({
         </Panel>
       )}
 
-      <Panel title="Filters">
+      <Panel title="Filters" accent="var(--section-accent)">
         <form method="get" style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
           <label style={labelStyle}>
             <span style={spanStyle}>Actor</span>

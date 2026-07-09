@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { Panel } from "@/components/ui/Panel";
 import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { RENEWAL_BAND_LABELS, type RenewalBand } from "@/domain/solutions/renewal";
 import { renewalAxis, type RenewalTimelineInput } from "@/domain/solutions/timeline";
 
@@ -24,11 +25,12 @@ export function SolutionRenewalTimeline({
   const axis = renewalAxis(items, today);
 
   return (
-    <Panel title="Renewal timeline">
+    <Panel title="Renewal timeline" accent="var(--section-accent)">
       {axis.points.length === 0 ? (
-        <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
-          No solutions have a renewal date yet — set one on a Solution to plot it here.
-        </p>
+        <EmptyState
+          title="No renewal dates yet"
+          hint="Set a renewal date on a Solution to plot it here."
+        />
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--muted)", marginBottom: 8, paddingLeft: "calc(clamp(104px, 28vw, 164px) + 8px)" }}>

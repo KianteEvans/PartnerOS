@@ -14,6 +14,8 @@ import { RingGauge } from "@/components/ui/RingGauge";
 import { BarChart } from "@/components/ui/BarChart";
 import { MetricCard, type MetricTrend } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { IconReports } from "@/components/ui/icons";
+import { PreflightList } from "@/components/ui/PreflightList";
 import {
   regenerateReport,
   submitReportForReview,
@@ -157,7 +159,7 @@ export default async function ReportDetailPage({
       </section>
 
       {report.summary && (
-        <Panel title="Executive summary">
+        <Panel title="Executive summary" accent="var(--section-accent)" icon={<IconReports size={16} />}>
           <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>{report.summary}</p>
         </Panel>
       )}
@@ -165,7 +167,7 @@ export default async function ReportDetailPage({
       {/* Saved executive narrative (drizzle/0052) — graph-grounded story, drafted while
           in draft, frozen by the lifecycle, cleared on snapshot regeneration. */}
       {(report.narrative || (status === "draft" && canUpdate)) && (
-        <Panel title="Executive narrative">
+        <Panel title="Executive narrative" accent="var(--section-accent)" icon={<IconReports size={16} />}>
           <div style={{ display: "grid", gap: 12 }}>
             {report.narrative ? (
               <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.7 }}>{report.narrative}</div>
@@ -195,7 +197,7 @@ export default async function ReportDetailPage({
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
-        <Panel title="MDF">
+        <Panel title="MDF" accent="var(--section-accent)">
           <BarChart
             data={[
               { label: "Requested", value: snapshot.mdf.requested, display: money(snapshot.mdf.requested) },
@@ -210,7 +212,7 @@ export default async function ReportDetailPage({
           </div>
         </Panel>
 
-        <Panel title="ACE co-sell">
+        <Panel title="ACE co-sell" accent="var(--section-accent)">
           <BarChart
             data={[
               { label: "Open value", value: snapshot.ace.openValue, color: "var(--accent-2)", display: money(snapshot.ace.openValue) },
@@ -224,7 +226,7 @@ export default async function ReportDetailPage({
           </div>
         </Panel>
 
-        <Panel title="Evidence">
+        <Panel title="Evidence" accent="var(--section-accent)">
           <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <RingGauge value={snapshot.evidence.percent} color="var(--accent-2)" caption="approved" size={104} />
             <div style={{ fontSize: 13, color: "var(--muted)", display: "grid", gap: 4 }}>
@@ -234,7 +236,7 @@ export default async function ReportDetailPage({
           </div>
         </Panel>
 
-        <Panel title="Programs">
+        <Panel title="Programs" accent="var(--section-accent)">
           <BarChart
             formatValue={(n) => String(n)}
             data={[
@@ -246,7 +248,7 @@ export default async function ReportDetailPage({
           <p style={{ margin: "10px 0 0", fontSize: 12, color: "var(--muted)" }}>{snapshot.programs.total} total in portfolio</p>
         </Panel>
 
-        <Panel title="Tier">
+        <Panel title="Tier" accent="var(--section-accent)">
           {snapshot.tier ? (
             <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               <RingGauge value={snapshot.tier.percent} color="var(--accent-2)" caption="to target" size={104} />
@@ -261,7 +263,7 @@ export default async function ReportDetailPage({
           )}
         </Panel>
 
-        <Panel title="Tasks & assessments">
+        <Panel title="Tasks & assessments" accent="var(--section-accent)">
           <MetricStrip min={120}>
             <MetricCard label="Open tasks" value={String(snapshot.tasks.open)} />
             <MetricCard label="Overdue" value={String(snapshot.tasks.overdue)} tone={snapshot.tasks.overdue > 0 ? "danger" : "neutral"} />
@@ -271,7 +273,7 @@ export default async function ReportDetailPage({
         </Panel>
 
         {snapshot.marketplace && snapshot.marketplace.listings > 0 && (
-          <Panel title="AWS Marketplace">
+          <Panel title="AWS Marketplace" accent="var(--section-accent)">
             <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               <RingGauge
                 value={Math.round((snapshot.marketplace.published / snapshot.marketplace.listings) * 100)}
@@ -297,17 +299,11 @@ export default async function ReportDetailPage({
         )}
       </div>
 
-      <Panel title="Approval preflight">
-        <div style={{ display: "grid", gap: 6 }}>
-          {preflight.checks.map((c) => (
-            <div key={c.label} style={{ fontSize: 13 }}>
-              <span style={{ color: c.ok ? "var(--accent)" : "var(--muted)" }}>{c.ok ? "✓" : "○"}</span> {c.label}
-            </div>
-          ))}
-        </div>
+      <Panel title="Approval preflight" accent={preflight.ready ? "ok" : "danger"} icon={<IconReports size={16} />}>
+        <PreflightList checks={preflight.checks} />
       </Panel>
 
-      <Panel title="Lifecycle">
+      <Panel title="Lifecycle" accent="var(--section-accent)">
         {status === "draft" && (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <MutationForm action={regenerateReport} submitLabel="Regenerate snapshot" variant="secondary" hidden={{ reportId: report.id }} />

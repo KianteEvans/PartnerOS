@@ -183,6 +183,7 @@ export default async function PortfolioPage({
 
       <Panel
         title="Managed workspaces"
+        accent="var(--section-accent)"
         actions={
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {SORTS.map((s) => (

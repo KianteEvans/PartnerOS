@@ -107,7 +107,7 @@ export default async function ProgramRoiPage(): Promise<ReactNode> {
             </Callout>
           ) : null}
 
-          <Panel title="Spend → outcome">
+          <Panel title="Spend → outcome" accent="var(--section-accent)">
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
                 <thead>

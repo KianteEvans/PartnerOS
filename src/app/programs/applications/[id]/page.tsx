@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { BulkProvider } from "@/components/ui/bulk/BulkProvider";
@@ -237,7 +238,7 @@ export default async function ApplicationDetailPage({
         }
       />
 
-      <Panel title="Response progress">
+      <Panel title="Response progress" accent="var(--section-accent)">
         <div style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--muted)", marginBottom: 6 }}>
             <span>{application.acceptedCount} of {application.controlCount} controls responded</span>
@@ -257,6 +258,7 @@ export default async function ApplicationDetailPage({
 
       <Panel
         title="Submission packet"
+        accent="var(--section-accent)"
         actions={
           <FormDrawer
             triggerLabel="Edit packet"
@@ -390,7 +392,7 @@ export default async function ApplicationDetailPage({
       </Panel>
 
       {showEligibility && (
-        <Panel title="Eligibility">
+        <Panel title="Eligibility" accent="var(--section-accent)">
           <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--muted)" }}>
             AWS prerequisites for a {application.programType} application — your workspace tier is{" "}
             <strong style={{ color: "var(--text)" }}>{TIER_LABELS[currentTier]}</strong>. Path stage and FTR
@@ -415,6 +417,7 @@ export default async function ApplicationDetailPage({
 
       <Panel
         title={`Case studies (${attachedCaseStudies.length})`}
+        accent="var(--section-accent)"
         actions={
           availableCaseStudies.length > 0 ? (
             <FormDrawer
@@ -450,7 +453,7 @@ export default async function ApplicationDetailPage({
           sheets when you export — in this order.
         </p>
         {attachedCaseStudies.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>No case studies attached yet.</p>
+          <EmptyState title="No case studies attached" hint="Attach a case study to fill the Customer Reference columns when you export." />
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
             {attachedCaseStudies.map((c, i) => (
@@ -477,7 +480,7 @@ export default async function ApplicationDetailPage({
         )}
       </Panel>
 
-      <Panel title="Generate & export">
+      <Panel title="Generate & export" accent="var(--section-accent)">
         <div style={{ display: "grid", gap: 12 }}>
           <GenerateAllResponses controlIds={generatableIds} enabled={aiEnabled} />
           <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -506,7 +509,7 @@ export default async function ApplicationDetailPage({
           {[...bySheet.entries()].map(([sheet, items]) => {
             const acc = items.filter((c) => c.status === "accepted").length;
             return (
-              <Panel key={sheet} title={`${sheet} — ${acc}/${items.length} responded`}>
+              <Panel key={sheet} title={`${sheet} — ${acc}/${items.length} responded`} accent="var(--section-accent)">
                 <div style={{ display: "grid", gap: 12 }}>
                   {items.map((c) => (
                     <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -551,7 +554,7 @@ export default async function ApplicationDetailPage({
 
       {controls.length === 0 && (
         <Panel>
-          <p style={{ color: "var(--muted)", margin: 0 }}>No controls were detected in this workbook.</p>
+          <EmptyState title="No controls detected" hint="No controls were detected in this workbook." />
         </Panel>
       )}
     </PageShell>

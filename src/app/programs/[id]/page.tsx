@@ -14,6 +14,9 @@ import { Table, type Column } from "@/components/ui/Table";
 import { BarChart } from "@/components/ui/BarChart";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { ChipList } from "@/components/ui/ChipList";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { IconApplications, IconPrograms, IconSolutions } from "@/components/ui/icons";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { EvaluateEvidence } from "@/components/ui/EvaluateEvidence";
@@ -205,7 +208,7 @@ export default async function ProgramDetailPage({
       />
 
       {program.status === "pending" && (
-        <Panel title="Submission">
+        <Panel title="Submission" accent="var(--section-accent)" icon={<IconPrograms size={16} />}>
           {gate === "ready_for_roadmap" ? (
             <>
               <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
@@ -224,7 +227,7 @@ export default async function ProgramDetailPage({
       )}
 
       {roiDetail && (
-        <Panel title="Program ROI">
+        <Panel title="Program ROI" accent="var(--section-accent)">
           <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 13 }}>
             ACE opportunities credited to this competency
             {roiDetail.achievedAt ? <> · achieved ~{roiDetail.achievedAt}</> : <> · not yet achieved</>}
@@ -271,6 +274,7 @@ export default async function ProgramDetailPage({
 
       <Panel
         title={`Requirements (${reqs.length})`}
+        accent="var(--section-accent)"
         actions={
           <Link href="/programs?view=fit" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
             Coverage analysis →
@@ -407,6 +411,8 @@ export default async function ProgramDetailPage({
 
       <Panel
         title={`Applications (${applications.length})`}
+        accent="var(--section-accent)"
+        icon={<IconApplications size={16} />}
         actions={
           <Link href="/programs/applications" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
             Upload application →
@@ -418,13 +424,15 @@ export default async function ProgramDetailPage({
           from its submission packet.
         </p>
         {applications.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
-            No applications linked yet. Upload the self-assessment in{" "}
-            <Link href="/programs/applications" style={{ color: "var(--accent)" }}>
-              Submit
-            </Link>
-            , then link it from the packet editor.
-          </p>
+          <EmptyState
+            title="No applications linked"
+            hint="Upload the self-assessment workbook, then link it to this program from the packet editor."
+            action={
+              <Link href="/programs/applications" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 600, fontSize: 13 }}>
+                Go to Submit →
+              </Link>
+            }
+          />
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {applications.map((a) => (
@@ -451,6 +459,8 @@ export default async function ProgramDetailPage({
       {linkedSolutions.length > 0 && (
         <Panel
           title={`Solutions (${linkedSolutions.length})`}
+          accent="var(--section-accent)"
+          icon={<IconSolutions size={16} />}
           actions={
             <Link
               href="/programs?view=solutions"
@@ -464,23 +474,18 @@ export default async function ProgramDetailPage({
             Validated Solutions owned by this competency — their renewal readiness keeps the
             designation current.
           </p>
-          <div style={{ display: "grid", gap: 10 }}>
-            {linkedSolutions.map((s) => (
-              <Card key={s.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <Link
-                    href={`/programs/solutions/${s.id}`}
-                    style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14, fontWeight: 600 }}
-                  >
-                    {s.title}
-                  </Link>
-                  <Badge tone={s.availability === "available" ? "ok" : s.availability === "beta" ? "info" : "danger"}>
-                    {availabilityLabel(s.availability)}
-                  </Badge>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <ChipList
+            items={linkedSolutions.map((s) => ({
+              key: s.id,
+              label: s.title,
+              href: `/programs/solutions/${s.id}`,
+              badges: (
+                <Badge tone={s.availability === "available" ? "ok" : s.availability === "beta" ? "info" : "danger"}>
+                  {availabilityLabel(s.availability)}
+                </Badge>
+              ),
+            }))}
+          />
         </Panel>
       )}
     </PageShell>

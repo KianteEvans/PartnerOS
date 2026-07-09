@@ -187,7 +187,7 @@ export default async function ReportsPage({
         </MutationForm>
       </Panel>
 
-      <Panel title="Generate report">
+      <Panel title="Generate report" accent="var(--section-accent)">
         <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
           Generating snapshots live metrics from MDF, ACE, programs, tiers, evidence,
           tasks, and assessments into an auditable package.
@@ -216,6 +216,7 @@ export default async function ReportsPage({
 
       <Panel
         title={`Reports (${total})`}
+        accent="var(--section-accent)"
         actions={<SearchForm q={params.q} placeholder="Search by title…" hidden={{ sort: params.sort, dir: params.dir }} />}
       >
         <Table

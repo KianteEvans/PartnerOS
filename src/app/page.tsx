@@ -8,15 +8,14 @@ import { tenants, onboarding } from "@/db/schema";
 import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { Card } from "@/components/ui/Card";
-import { Badge, statusTone, type Tone } from "@/components/ui/Badge";
+import { Badge, type Tone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { ActivityList } from "@/components/ui/ActivityList";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { ButtonLink } from "@/components/ui/Button";
 import { MarketingHome } from "@/components/marketing/MarketingHome";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { AttentionList } from "@/components/ui/AttentionItem";
 import {
   IconOnboarding,
   IconAssessments,
@@ -40,7 +39,6 @@ import { portfolioSummary as mdfPortfolioSummary } from "@/domain/mdf/analytics"
 import { loadBenchmarks } from "@/domain/benchmarks/load";
 import { BenchmarksPanel } from "@/app/BenchmarksPanel";
 import { mkTrend } from "@/domain/trend";
-import type { Decision } from "@/domain/command/brief";
 import { progressPercent, stepIndex, WIZARD_STEPS, type OnboardingStepId } from "@/domain/onboarding/catalog";
 import { loadActivation } from "@/domain/onboarding/activation-load";
 import { activationChecklist } from "@/domain/onboarding/activation";
@@ -263,6 +261,7 @@ async function SignedIn({
       {/* Needs attention — the same decisions the notification bell shows */}
       <Panel
         title="Needs attention"
+        accent="var(--section-accent)"
         actions={
           <Link
             href="/command?mode=workbench"
@@ -272,15 +271,19 @@ async function SignedIn({
           </Link>
         }
       >
-        {decisions.length === 0 ? (
-          <EmptyState title="You're all caught up" hint="No open decisions right now." />
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {decisions.map((d) => (
-              <DecisionRow key={d.id} d={d} ownerName={ownerName} />
-            ))}
-          </div>
-        )}
+        <AttentionList
+          items={decisions.map((d) => ({
+            key: d.id,
+            severity: d.severity,
+            title: d.title,
+            detail: d.detail,
+            href: d.link,
+            owner: ownerName(d.ownerUserId),
+            dueDate: d.dueDate,
+            today,
+          }))}
+          empty={{ title: "You're all caught up", hint: "No open decisions right now." }}
+        />
       </Panel>
 
       {/* Benchmarks — how you compare to anonymized peer cohorts (impossible in ACE) */}
@@ -335,7 +338,7 @@ async function SignedIn({
 
       {/* Recent activity (audit ledger) */}
       {canReceipts && data.receipts.length > 0 && (
-        <Panel title="Recent activity">
+        <Panel title="Recent activity" accent="var(--section-accent)">
           <ActivityList
             items={data.receipts.slice(0, 6).map((r) => ({
               action: r.action,
@@ -347,30 +350,5 @@ async function SignedIn({
         </Panel>
       )}
     </PageShell>
-  );
-}
-
-function DecisionRow({ d, ownerName }: { d: Decision; ownerName: (id: string | null) => string }): ReactNode {
-  return (
-    <Card compact interactive style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-      <div>
-        <span style={{ marginRight: 8 }}>
-          <Badge tone={statusTone(d.severity)}>{d.severity}</Badge>
-        </span>
-        <Link href={d.link} style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14 }}>
-          {d.title}
-        </Link>
-        <p style={{ color: "var(--muted)", fontSize: 12, margin: "2px 0 0" }}>{d.detail}</p>
-      </div>
-      <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
-        {ownerName(d.ownerUserId)}
-        {d.dueDate ? (
-          <>
-            <br />
-            due {d.dueDate}
-          </>
-        ) : null}
-      </div>
-    </Card>
   );
 }

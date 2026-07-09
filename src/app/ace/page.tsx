@@ -400,7 +400,7 @@ export default async function AcePage({
       </MetricStrip>
 
       {aceManagement && attention.length > 0 && (
-        <Panel title="Needs attention">
+        <Panel title="Needs attention" accent="var(--section-accent)">
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
             {attention.map((a) => (
               <Link key={a.title} href={a.href} style={{ textDecoration: "none", color: "inherit" }}>
@@ -476,7 +476,7 @@ function WinLossInsights({ view }: { view: WinLossView }): ReactNode {
 
   if (o.closed === 0) {
     return (
-      <Panel title="Win/loss insights">
+      <Panel title="Win/loss insights" accent="var(--section-accent)">
         <EmptyState
           title="No closed deals yet"
           hint="Mark opportunities won or lost (with a loss reason) — insights start with the first closed deal."
@@ -593,7 +593,7 @@ function PipelineSummaryPanel({
 }): ReactNode {
   return (
     // eslint-disable-next-line @next/next/no-html-link-for-pages -- /ace/export is a CSV download route handler (not the [id] page); an <a> is correct for a file download.
-    <Panel title="Pipeline" actions={<a href="/ace/export" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>Account plan (CSV)</a>}>
+    <Panel title="Pipeline" accent="var(--section-accent)" actions={<a href="/ace/export" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>Account plan (CSV)</a>}>
       <div style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "center" }}>
         <RingGauge value={wr ?? 0} max={100} size={120} color="var(--ok)" label={wr === null ? "—" : `${wr}%`} caption="Win rate" />
         <div style={{ flex: 1, minWidth: 300 }}>
@@ -649,7 +649,7 @@ function SyncedPartnerCentral({
     today,
   );
   return (
-    <Panel title="Synced from AWS Partner Central">
+    <Panel title="Synced from AWS Partner Central" accent="var(--section-accent)">
       {!configured ? (
         <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
           Connect AWS in{" "}
@@ -680,9 +680,10 @@ function SyncedPartnerCentral({
             </p>
           ) : null}
           {synced.length === 0 ? (
-            <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>
-              No synced opportunities yet — click <strong>Sync now</strong> to pull from Partner Central.
-            </p>
+            <EmptyState
+              title="No synced opportunities yet"
+              hint={<>Click <strong>Sync now</strong> to pull from Partner Central.</>}
+            />
           ) : (
             <div style={{ display: "grid", gap: 10 }}>
               {synced.map((o) => (
@@ -745,7 +746,7 @@ function Reconcile({
 }): ReactNode {
   if (!connection?.enabled) {
     return (
-      <Panel title="Reconcile with AWS">
+      <Panel title="Reconcile with AWS" accent="var(--section-accent)">
         <EmptyState
           title="Connect AWS Partner Central"
           hint={
@@ -775,6 +776,7 @@ function Reconcile({
   return (
     <Panel
       title="Reconcile with AWS"
+      accent="var(--section-accent)"
       actions={
         <SyncStatusStrip
           health={health}
@@ -1211,7 +1213,7 @@ function Relationships({
   return (
     <>
       {queue.length > 0 && (
-        <Panel title={`Re-engage now (${queue.length})`}>
+        <Panel title={`Re-engage now (${queue.length})`} accent="var(--section-accent)">
           <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--muted)" }}>
             Cooling relationships with open pipeline at stake — biggest first. Log a touch to re-warm them.
           </p>
@@ -1243,7 +1245,7 @@ function Relationships({
       )}
 
       {healths.length > 0 && (
-        <Panel title="Relationship health">
+        <Panel title="Relationship health" accent="var(--section-accent)">
           <BarChart
             formatValue={(n) => String(n)}
             data={[
@@ -1275,7 +1277,7 @@ function Relationships({
       )}
 
       {coverage.length > 0 && (
-        <Panel title="Account coverage">
+        <Panel title="Account coverage" accent="var(--section-accent)">
           <div style={{ display: "grid", gap: 6 }}>
             {coverage.map((c) => (
               <div key={c.account} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, borderBottom: "1px solid var(--border)", paddingBottom: 4 }}>
@@ -1468,7 +1470,7 @@ function Reps({
   const roleMax = Math.max(1, ...roles.map((r) => r.openTCV));
 
   const internalPanel = (
-    <Panel title="Your team (internal workload)">
+    <Panel title="Your team (internal workload)" accent="var(--section-accent)">
       <Table
         rows={internal}
         rowKey={(r) => r.ownerUserId}
@@ -1485,7 +1487,7 @@ function Reps({
   if (rollups.length === 0) {
     return (
       <div style={{ display: "grid", gap: 16 }}>
-        <Panel title="AWS sales org">
+        <Panel title="AWS sales org" accent="var(--section-accent)">
           <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>
             No AWS sales contacts yet. Enable <strong>Enrich AWS team</strong> on the AWS Partner
             Central connection in{" "}
@@ -1506,6 +1508,7 @@ function Reps({
     <div style={{ display: "grid", gap: 16 }}>
       <Panel
         title="AWS sales org"
+        accent="var(--section-accent)"
         actions={
           connection?.enabled ? (
             <SyncStatusStrip
@@ -1572,7 +1575,7 @@ function Reps({
         )}
       </Panel>
 
-      <Panel title={`AWS reps (${rollups.length})`}>
+      <Panel title={`AWS reps (${rollups.length})`} accent="var(--section-accent)">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10, fontSize: 12 }}>
           <span style={{ color: "var(--muted)" }}>Sort:</span>
           <SegmentedControl
@@ -1645,7 +1648,7 @@ function Reps({
         </div>
       </Panel>
 
-      <Panel title="Account coverage">
+      <Panel title="Account coverage" accent="var(--section-accent)">
         <Table
           rows={accounts}
           rowKey={(a) => a.account}
@@ -1669,7 +1672,7 @@ function Reps({
       </Panel>
 
       {gaps.length > 0 && (
-        <Panel title={`Coverage gaps (${gaps.length})`}>
+        <Panel title={`Coverage gaps (${gaps.length})`} accent="var(--section-accent)">
           <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--muted)" }}>
             Open deals missing an AWS Sales Rep or PSM — engage the sales org to get them covered.
           </p>

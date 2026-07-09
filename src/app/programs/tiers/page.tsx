@@ -18,6 +18,7 @@ import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
+import { IconTiers } from "@/components/ui/icons";
 import {
   createTierPlan,
   updateTierRequirement,
@@ -131,7 +132,7 @@ function NoPlan({ currentTier }: { currentTier: TierId }): ReactNode {
   return (
     <>
       <TierLadder steps={tierLadder(currentTier)} />
-      <Panel title="Build an advancement plan">
+      <Panel title="Build an advancement plan" accent="var(--section-accent)" icon={<IconTiers size={16} />}>
         <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
           You are at <strong>{TIER_LABELS[currentTier]}</strong>. Start a plan to track the requirements for your next tier.
         </p>
@@ -331,7 +332,7 @@ function Plan({
         <PathSimulator values={values} reqs={reqs} plan={plan} members={members} today={today} targetTier={targetTier} pathData={pathData} />
       ) : (
         <>
-      <Panel title="Requirement progress">
+      <Panel title="Requirement progress" accent="var(--section-accent)">
         <BarChart
           max={100}
           data={reqs
@@ -350,7 +351,7 @@ function Plan({
 
       {!achieved &&
         (achievable ? (
-          <Panel title="Ready to advance">
+          <Panel title="Ready to advance" accent="var(--section-accent)" icon={<IconTiers size={16} />}>
             <div
               style={{
                 background: "var(--surface-tint-ok)",
@@ -369,7 +370,7 @@ function Plan({
             </div>
           </Panel>
         ) : (
-          <Panel title="30 / 60 / 90-day plan">
+          <Panel title="30 / 60 / 90-day plan" accent="var(--section-accent)">
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
               {([["Next 30 days", phases.phase30, "var(--accent)"], ["31–60 days", phases.phase60, "var(--accent-2)"], ["61–90 days", phases.phase90, "var(--muted)"]] as const).map(
                 ([label, items, dot]) => (
@@ -407,7 +408,7 @@ function Plan({
           </Panel>
         ))}
 
-      <Panel title={`Requirements (${reqs.length})`}>
+      <Panel title={`Requirements (${reqs.length})`} accent="var(--section-accent)">
         <div style={{ display: "grid", gap: 14 }}>
           {reqs.map((r) => (
             <RequirementCard key={r.id} r={r} members={members} achieved={achieved} />
@@ -493,7 +494,7 @@ function PathSimulator({
         </div>
       </Panel>
 
-      <Panel title="Scenarios">
+      <Panel title="Scenarios" accent="var(--section-accent)">
         <MetricStrip min={150}>
           {path.scenarios.map((s) => (
             <MetricCard key={s.id} label={s.label} value={s.etaDate ?? "—"} sub={s.etaDate ? inDays(s.etaDate) : ""} tone={s.id === "steady" ? "accent" : "neutral"} />
@@ -501,7 +502,7 @@ function PathSimulator({
         </MetricStrip>
       </Panel>
 
-      <Panel title="Dated plan — steady pace">
+      <Panel title="Dated plan — steady pace" accent="var(--section-accent)">
         <div style={{ display: "grid", gap: 8 }}>
           {(steady?.steps ?? []).map((step) => (
             <div key={step.key} style={{ background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "10px 12px", display: "grid", gap: 6 }}>
@@ -538,7 +539,7 @@ function PathSimulator({
         ) : null}
       </Panel>
 
-      <Panel title="Team capacity">
+      <Panel title="Team capacity" accent="var(--section-accent)">
         {cap.bottleneck ? (
           <Callout tone="warn" title="Capacity bottleneck">
             {cap.unowned > 0

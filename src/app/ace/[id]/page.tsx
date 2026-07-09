@@ -77,7 +77,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
 
       <Panel title="Your moves" accent="var(--section-accent)">
         {model.moves.length === 0 ? (
-          <p style={{ margin: 0, color: "var(--muted)", fontSize: 14 }}>This deal is on track — no priority moves right now.</p>
+          <EmptyState title="On track" hint="No priority moves right now." />
         ) : (
           <div style={{ display: "grid", gap: 10 }}>
             {model.moves.map((m, i) => (
@@ -107,7 +107,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         <MetricCard label="AWS team" value={String(model.awsTeam.length)} sub={teamAtStake > 0 ? `${teamAtStake} at stake` : "contacts"} tone={teamAtStake > 0 ? "warn" : "neutral"} />
       </MetricStrip>
 
-      <Panel title="Funding fit">
+      <Panel title="Funding fit" accent="var(--section-accent)">
         {model.fundingMatches.length === 0 ? (
           <EmptyState title="No funding programs matched" hint="This deal doesn't currently qualify for a catalog program — revisit as the deal progresses." />
         ) : (
@@ -143,7 +143,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         )}
       </Panel>
 
-      <Panel title="MDF support">
+      <Panel title="MDF support" accent="var(--section-accent)">
         {model.mdf.length === 0 ? (
           <EmptyState
             title="No MDF backing this deal"
@@ -166,7 +166,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         )}
       </Panel>
 
-      <Panel title="Marketplace">
+      <Panel title="Marketplace" accent="var(--section-accent)">
         {model.marketplace.listings.length === 0 ? (
           <EmptyState title="No linked marketplace listing" hint="Link this deal's Solution to a Marketplace listing (in the opportunity editor) to track private offers here." />
         ) : (
@@ -199,7 +199,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         )}
       </Panel>
 
-      <Panel title="Private offer">
+      <Panel title="Private offer" accent="var(--section-accent)">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)" }}>
             Draft the private offer that closes this deal on Marketplace — it reconciles to the AWS agreement on the next billing sync.
@@ -243,7 +243,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         )}
       </Panel>
 
-      <Panel id="case-studies" title="Relevant case studies">
+      <Panel id="case-studies" title="Relevant case studies" accent="var(--section-accent)">
         {model.caseStudyLibraryCount === 0 ? (
           <EmptyState
             title="No case studies yet"
@@ -321,7 +321,7 @@ export default async function DealDeskPage({ params }: { params: Promise<{ id: s
         )}
       </Panel>
 
-      <Panel title="AWS team">
+      <Panel title="AWS team" accent="var(--section-accent)">
         {model.awsTeam.length === 0 ? (
           <EmptyState title="No AWS team mapped" hint="Sync the AWS sales org (ACE → Sales Org) or link an AWS contact to see relationship health here." />
         ) : (

@@ -5,6 +5,8 @@ import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { MutationForm } from "@/components/ui/MutationForm";
+import { IconAssessments } from "@/components/ui/icons";
+import { formLabel as labelStyle, formLabelSpan as spanStyle, formControl as controlStyle } from "@/components/ui/form-styles";
 import { createAssessment } from "@/domain/assessments/actions";
 import {
   PRESET_LABELS,
@@ -12,16 +14,6 @@ import {
   MODULE_LABELS,
   type PresetId,
 } from "@/domain/assessments/catalog";
-
-const labelStyle = { display: "grid", gap: 4, fontSize: 13 } as const;
-const spanStyle = { color: "var(--muted)" } as const;
-const controlStyle = {
-  background: "var(--bg)",
-  border: "1px solid var(--border)",
-  borderRadius: 8,
-  padding: "8px 10px",
-  color: "var(--text)",
-} as const;
 
 const PRESETS = Object.keys(PRESET_LABELS) as PresetId[];
 
@@ -36,7 +28,10 @@ export default async function NewAssessmentPage(): Promise<ReactNode> {
         back={{ href: "/plan", label: "Assessments" }}
         title="New readiness assessment"
       />
-      <Panel>
+      <Panel title="Assessment details" accent="var(--section-accent)" icon={<IconAssessments size={16} />}>
+        <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
+          Name your assessment and pick a preset — the preset scopes which readiness modules you&apos;ll answer.
+        </p>
         <MutationForm action={createAssessment} submitLabel="Create draft">
           <label style={labelStyle}>
             <span style={spanStyle}>Name</span>

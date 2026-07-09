@@ -7,12 +7,13 @@ import { Panel } from "@/components/ui/Panel";
 import { PageShell } from "@/components/ui/PageShell";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
-import { Badge, statusTone } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { BarChart } from "@/components/ui/BarChart";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { ActivityList } from "@/components/ui/ActivityList";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AttentionItem, AttentionList } from "@/components/ui/AttentionItem";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
 import { CommandNav } from "@/app/command/CommandNav";
 import { AllianceCopilot } from "@/app/command/AllianceCopilot";
@@ -23,7 +24,7 @@ import { loadCommandData } from "@/domain/command/load";
 import { buildCommandCenter } from "@/domain/command/aggregate";
 import { loadHubTrends } from "@/domain/command/trends-load";
 import { mkTrend } from "@/domain/trend";
-import { IconPortfolio, IconMdf, IconPrograms } from "@/components/ui/icons";
+import { IconPortfolio, IconMdf, IconPrograms, IconWarning, IconClock } from "@/components/ui/icons";
 import { loadBenchmarks, pickPosition } from "@/domain/benchmarks/load";
 import { BenchmarkBand } from "@/components/ui/BenchmarkBand";
 import { TIER_LABELS, type TierId } from "@/domain/tiers/catalog";
@@ -35,14 +36,12 @@ import {
   DECISION_VIEW_LABELS,
   SITUATION_LABELS,
   type DecisionView,
-  type Decision,
   type Severity,
   type Situation,
 } from "@/domain/command/brief";
 import { nextBestActions, EFFORT_LABELS } from "@/domain/command/next-best-action";
 import { composeScenario } from "@/domain/command/scenario";
 import { whatBreaksNext } from "@/domain/command/horizon";
-import { daysBetween } from "@/domain/dates";
 import { money } from "@/domain/format";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
@@ -190,7 +189,7 @@ export default async function CommandPage({
 
       {/* Today's Command Brief */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
-        <Panel title="Partnership health">
+        <Panel title="Partnership health" accent="var(--section-accent)">
           <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
               <RingGauge
@@ -221,33 +220,45 @@ export default async function CommandPage({
           </div>
         </Panel>
 
-        <Panel title="Highest-priority risk">
+        <Panel title="Highest-priority risk" accent="var(--section-accent)" icon={<IconWarning size={16} />}>
           {cc.topRisk ? (
-            <div style={{ fontSize: 14 }}>
-              <div style={{ color: SEVERITY_COLOR[cc.topRisk.severity], fontWeight: 600, textTransform: "capitalize" }}>{cc.topRisk.severity}</div>
-              <Link href={cc.topRisk.link} style={{ color: "var(--accent)", textDecoration: "none" }}>{cc.topRisk.title}</Link>
-              <p style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 0" }}>{cc.topRisk.detail}</p>
-            </div>
+            <AttentionItem
+              variant="hero"
+              severity={cc.topRisk.severity}
+              title={cc.topRisk.title}
+              detail={cc.topRisk.detail}
+              href={cc.topRisk.link}
+              owner={ownerName(cc.topRisk.ownerUserId)}
+              dueDate={cc.topRisk.dueDate}
+              today={today}
+              cta="Review →"
+            />
           ) : (
-            <p style={{ color: "var(--muted)", margin: 0 }}>No open risks. 🎉</p>
+            <EmptyState title="No open risks" hint="Nothing critical needs attention right now." />
           )}
         </Panel>
 
-        <Panel title="Required decision">
+        <Panel title="Required decision" accent="var(--section-accent)" icon={<IconClock size={16} />}>
           {cc.requiredDecision ? (
-            <div style={{ fontSize: 14 }}>
-              <Link href={cc.requiredDecision.link} style={{ color: "var(--accent)", textDecoration: "none" }}>{cc.requiredDecision.title}</Link>
-              <p style={{ color: "var(--muted)", fontSize: 13, margin: "4px 0 0" }}>
-                Owner: {ownerName(cc.requiredDecision.ownerUserId)}{cc.requiredDecision.dueDate ? ` · due ${cc.requiredDecision.dueDate}` : ""}
-              </p>
-            </div>
+            <AttentionItem
+              variant="hero"
+              severity={cc.requiredDecision.severity}
+              title={cc.requiredDecision.title}
+              detail={cc.requiredDecision.detail}
+              href={cc.requiredDecision.link}
+              owner={ownerName(cc.requiredDecision.ownerUserId)}
+              dueDate={cc.requiredDecision.dueDate}
+              today={today}
+              cta="Decide →"
+            />
           ) : (
-            <p style={{ color: "var(--muted)", margin: 0 }}>Nothing requires a decision.</p>
+            <EmptyState title="Nothing requires a decision" hint="You're all caught up here." />
           )}
         </Panel>
 
         <Panel
           title="Work"
+          accent="var(--section-accent)"
           actions={
             <Link href="/command/tasks" style={{ color: "var(--accent)", textDecoration: "none", fontSize: 13 }}>
               Open tasks →
@@ -262,9 +273,9 @@ export default async function CommandPage({
           </div>
         </Panel>
 
-        <Panel title="Decision load by owner">
+        <Panel title="Decision load by owner" accent="var(--section-accent)">
           {ownerLoadRows.length === 0 ? (
-            <p style={{ color: "var(--muted)", margin: 0, fontSize: 13 }}>No open decisions.</p>
+            <EmptyState title="No open decisions" hint="Nothing is waiting on an owner right now." />
           ) : (
             <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
               {ownerLoadRows.map((r) => (
@@ -516,7 +527,7 @@ export default async function CommandPage({
       {mode === "workbench" && <GroupHeading label="Queue & receipts" caption="every open decision, and what automation already did" />}
 
       {/* Decision queue */}
-      <Panel title="Decision queue">
+      <Panel title="Decision queue" accent="var(--section-accent)">
         {mode === "executive" && (
           <nav style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
             {COHORT_SITUATIONS.map((s) => {
@@ -543,19 +554,23 @@ export default async function CommandPage({
             })}
           </nav>
         )}
-        {decisions.length === 0 ? (
-          <EmptyState title="No decisions in this view" hint="Nothing needs attention here right now." />
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {decisions.map((d) => (
-              <DecisionRow key={d.id} d={d} ownerName={ownerName} today={today} />
-            ))}
-          </div>
-        )}
+        <AttentionList
+          items={decisions.map((d) => ({
+            key: d.id,
+            severity: d.severity,
+            title: d.title,
+            detail: d.detail,
+            href: d.link,
+            owner: ownerName(d.ownerUserId),
+            dueDate: d.dueDate,
+            today,
+          }))}
+          empty={{ title: "No decisions in this view", hint: "Nothing needs attention here right now." }}
+        />
       </Panel>
 
       {/* Progress */}
-      <Panel title="Progress">
+      <Panel title="Progress" accent="var(--section-accent)">
         <BarChart
           max={100}
           color="var(--accent-2)"
@@ -581,7 +596,7 @@ export default async function CommandPage({
 
       {/* Recent workflow receipts (audit ledger) */}
       {canReceipts && (
-        <Panel title="Recent workflow receipts">
+        <Panel title="Recent workflow receipts" accent="var(--section-accent)">
           <ActivityList
             items={data.receipts.map((r) => ({
               action: r.action,
@@ -617,49 +632,5 @@ function GroupSummary({ label, caption }: { label: string; caption: string }): R
       </span>
       <span style={{ color: "var(--muted)", marginLeft: 10 }}>{caption}</span>
     </summary>
-  );
-}
-
-function DecisionRow({
-  d,
-  ownerName,
-  today,
-}: {
-  d: Decision;
-  ownerName: (id: string | null) => string;
-  today: string;
-}): ReactNode {
-  const days = d.dueDate ? daysBetween(today, d.dueDate) : null;
-  const urgency =
-    days === null
-      ? null
-      : days < 0
-        ? { text: `overdue ${Math.abs(days)}d`, color: "var(--danger)" }
-        : days <= 7
-          ? { text: `due in ${days}d`, color: "var(--warn)" }
-          : { text: `due ${d.dueDate}`, color: "var(--muted)" };
-  return (
-    <Card compact interactive style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-      <div style={{ minWidth: 0 }}>
-        <span style={{ marginRight: 8 }}><Badge tone={statusTone(d.severity)}>{d.severity}</Badge></span>
-        <Link href={d.link} style={{ color: "var(--accent)", textDecoration: "none", fontSize: 14 }}>{d.title}</Link>
-        <p
-          style={{
-            color: "var(--muted)",
-            fontSize: 12,
-            margin: "2px 0 0",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {d.detail}
-        </p>
-      </div>
-      <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
-        {ownerName(d.ownerUserId)}
-        {urgency ? <><br /><span style={{ color: urgency.color, fontWeight: 600 }}>{urgency.text}</span></> : null}
-      </div>
-    </Card>
   );
 }

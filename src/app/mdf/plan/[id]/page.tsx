@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { Callout } from "@/components/ui/Callout";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { MdfNav } from "@/app/mdf/MdfNav";
@@ -186,7 +187,7 @@ export default async function MdfPlanDetailPage({
         }
       >
         {items.length === 0 ? (
-          <p style={{ color: "var(--muted)", margin: 0 }}>No events yet. Add candidate events grounded in an AWS activity type.</p>
+          <EmptyState title="No events yet" hint="Add candidate events grounded in an AWS activity type." />
         ) : (
           <PlanViews
             list={

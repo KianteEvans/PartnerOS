@@ -8,7 +8,7 @@ import { Badge, type Tone } from "@/components/ui/Badge";
 import { RingGauge } from "@/components/ui/RingGauge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
-import { EmptyState } from "@/components/ui/EmptyState";
+import { AttentionList } from "@/components/ui/AttentionItem";
 import { IconTasks, IconClock, IconPrograms, IconTiers } from "@/components/ui/icons";
 import { loadManagedWorkspace } from "@/domain/portfolio/load";
 import { mkTrend } from "@/domain/trend";
@@ -18,12 +18,6 @@ const BAND_COLOR: Record<string, string> = {
   strong: "var(--ok)",
   fair: "var(--warn)",
   at_risk: "var(--danger)",
-};
-const SEVERITY_COLOR: Record<string, string> = {
-  critical: "var(--danger)",
-  high: "var(--danger)",
-  medium: "var(--warn)",
-  low: "var(--muted)",
 };
 
 /**
@@ -42,6 +36,7 @@ export default async function ManagedWorkspacePage({
   const view = await loadManagedWorkspace(identity, id);
   if (!view) redirect("/portfolio"); // not an agency, or not managed by this agency
   const { meta, cc, trends } = view;
+  const today = new Date().toISOString().slice(0, 10);
 
   const openButton = (
     <form method="post" action="/api/portfolio/switch" style={{ margin: 0 }}>
@@ -117,32 +112,19 @@ export default async function ManagedWorkspacePage({
         </MetricStrip>
       </section>
 
-      <Panel title="Needs attention">
-        {cc.decisions.length === 0 ? (
-          <EmptyState title="All clear" hint="No open decisions in this workspace." />
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {cc.decisions.slice(0, 8).map((d) => (
-              <div
-                key={d.id}
-                style={{
-                  display: "grid",
-                  gap: 2,
-                  borderLeft: `3px solid ${SEVERITY_COLOR[d.severity] ?? "var(--border)"}`,
-                  paddingLeft: 12,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>{d.title}</span>
-                  <span style={{ fontSize: 11, color: SEVERITY_COLOR[d.severity] ?? "var(--muted)", textTransform: "capitalize" }}>
-                    {d.severity}
-                  </span>
-                </div>
-                <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{d.detail}</span>
-              </div>
-            ))}
-          </div>
-        )}
+      <Panel title="Needs attention" accent="var(--section-accent)">
+        <AttentionList
+          items={cc.decisions.slice(0, 8).map((d) => ({
+            key: d.id,
+            severity: d.severity,
+            title: d.title,
+            detail: d.detail,
+            href: d.link,
+            dueDate: d.dueDate,
+            today,
+          }))}
+          empty={{ title: "All clear", hint: "No open decisions in this workspace." }}
+        />
       </Panel>
     </PageShell>
   );

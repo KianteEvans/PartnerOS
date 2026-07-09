@@ -40,13 +40,13 @@ function ProjectionPanel({
 }): ReactNode {
   if (!fc || fc.history.length === 0) {
     return (
-      <Panel title={title}>
+      <Panel title={title} accent="var(--section-accent)">
         <EmptyState title="No history yet" hint="Snapshots are captured as you use the app — this forecast unlocks once a series exists." />
       </Panel>
     );
   }
   return (
-    <Panel title={title}>
+    <Panel title={title} accent="var(--section-accent)">
       {fc.projection ? (
         <>
           <ProjectionChart history={fc.history} band={fc.projection.band} formatValue={formatValue} />

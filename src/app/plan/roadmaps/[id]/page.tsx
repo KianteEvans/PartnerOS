@@ -260,7 +260,7 @@ export default async function RoadmapDetailPage({
       )}
 
       {milestones.length > 0 && (
-        <Panel title="Progress">
+        <Panel title="Progress" accent="var(--section-accent)">
           <RoadmapProgressHeader progress={prog} />
         </Panel>
       )}
@@ -277,7 +277,7 @@ export default async function RoadmapDetailPage({
 
       {milestones.length > 0 && <RoadmapTrajectory forecast={forecast} series={burnup} />}
 
-      <Panel title="Share & iterate">
+      <Panel title="Share & iterate" accent="var(--section-accent)">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <a href={`/plan/roadmaps/${roadmap.id}/export`} style={secBtnStyle}>
             Export CSV
@@ -354,7 +354,7 @@ export default async function RoadmapDetailPage({
       </Panel>
 
       {!isDraft && (
-        <Panel title="Finalized">
+        <Panel title="Finalized" accent="var(--section-accent)">
           <p style={{ color: "var(--muted)", margin: 0, fontSize: 14 }}>
             The structure is locked — keep the plan alive by updating each
             milestone&apos;s status. Each milestone was handed off as a task.{" "}
@@ -365,7 +365,7 @@ export default async function RoadmapDetailPage({
         </Panel>
       )}
 
-      <Panel title={`Milestones (${milestones.length})`}>
+      <Panel title={`Milestones (${milestones.length})`} accent="var(--section-accent)">
         <MilestoneViews
           roadmapId={roadmap.id}
           isDraft={isDraft}
@@ -378,7 +378,7 @@ export default async function RoadmapDetailPage({
       </Panel>
 
       {isDraft && (
-        <Panel title="Grow from catalog">
+        <Panel title="Grow from catalog" accent="var(--section-accent)">
           <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
             Pull more AWS programs or a tier target into this draft. Anything
             already on the plan is skipped.
@@ -449,7 +449,7 @@ export default async function RoadmapDetailPage({
       )}
 
       {isDraft && (
-        <Panel title="Finalize">
+        <Panel title="Finalize" accent="var(--section-accent)">
           <p style={{ color: "var(--muted)", marginTop: 0, fontSize: 14 }}>
             Finalizing locks the roadmap structure, creates one task per milestone
             (owners carry over), and — for composed roadmaps — adopts the selected

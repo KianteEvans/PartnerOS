@@ -113,7 +113,7 @@ export default async function FundingSubmissionDetail({
       ) : null}
 
       {/* Status workbench */}
-      <Panel title="Next step">
+      <Panel title="Next step" accent="var(--section-accent)">
         {s.status === "draft" && (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
             <MutationForm action={submitFundingSubmission} submitLabel="Submit to AWS" successMessage="Submitted.">
@@ -174,7 +174,7 @@ export default async function FundingSubmissionDetail({
       </Panel>
 
       {program ? (
-        <Panel title="Program">
+        <Panel title="Program" accent="var(--section-accent)">
           <p style={{ margin: "0 0 8px", fontSize: 13.5, lineHeight: 1.55 }}>{program.description}</p>
           <a href={program.applyUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: "var(--section-accent)" }}>
             AWS Partner Funding Portal →

@@ -14,7 +14,7 @@ import type { PursuitItem } from "@/domain/programs/pursue";
  */
 export function PursuitTracker({ items }: { items: readonly PursuitItem[] }): ReactNode {
   return (
-    <Panel title="In pursuit">
+    <Panel title="In pursuit" accent="var(--section-accent)">
       {items.length === 0 ? (
         <EmptyState
           title="No programs in active pursuit"

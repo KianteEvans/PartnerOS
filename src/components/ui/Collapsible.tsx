@@ -59,6 +59,7 @@ export function CollapsibleSection({
   initialCollapsed,
   title,
   accentColor,
+  icon,
   actions,
   children,
 }: {
@@ -66,6 +67,7 @@ export function CollapsibleSection({
   initialCollapsed: boolean;
   title: string;
   accentColor?: string | undefined;
+  icon?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
 }): ReactNode {
@@ -91,6 +93,7 @@ export function CollapsibleSection({
           style={{ ...toggleButtonBase, display: "flex", alignItems: "center", gap: 8, color: accentColor ?? "var(--text)", flex: 1, minWidth: 0 }}
         >
           <Chevron collapsed={collapsed} />
+          {icon ? <span style={{ display: "inline-flex", flexShrink: 0 }}>{icon}</span> : null}
           <h2 style={{ margin: 0, fontSize: 16, color: accentColor }}>{title}</h2>
         </button>
         {actions ? <div style={{ flexShrink: 0 }}>{actions}</div> : null}

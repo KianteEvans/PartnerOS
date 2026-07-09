@@ -270,7 +270,7 @@ export default async function ProgramsPage({
       ) : isRoi ? (
         <RoiView roiItems={roiItems} rollup={rollup} />
       ) : view === "available" ? (
-        <Panel title="Program Library">
+        <Panel title="Program Library" accent="var(--section-accent)">
           {pagedLibrary.length === 0 ? (
             <EmptyState
               title={list.q ? "No library programs match" : "Library fully adopted"}
@@ -499,11 +499,12 @@ function RoiView({
         <MetricCard label="Won since achieved" value={money(rollup.influencedWonTCV)} tone="ok" icon={<IconMdf size={15} />} />
       </MetricStrip>
 
-      <Panel title="Won TCV by Competency">
+      <Panel title="Won TCV by Competency" accent="var(--section-accent)">
         {withWins.length === 0 ? (
-          <p style={{ color: "var(--muted)", margin: 0, fontSize: 13 }}>
-            No won deals attributed yet — tag closed-won ACE opportunities to a Competency in ACE.
-          </p>
+          <EmptyState
+            title="No won deals attributed"
+            hint="Tag closed-won ACE opportunities to a Competency in ACE to see them here."
+          />
         ) : (
           <BarChart
             color="var(--ok)"
@@ -512,7 +513,7 @@ function RoiView({
         )}
       </Panel>
 
-      <Panel title="Per-Competency ROI">
+      <Panel title="Per-Competency ROI" accent="var(--section-accent)">
         <div style={{ display: "grid", gap: 10 }}>
           {roiItems.map((r) => (
             <Card key={r.id}>

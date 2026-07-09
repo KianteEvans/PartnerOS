@@ -298,6 +298,7 @@ export default async function EvidencePage({
 
       <Panel
         title="Overview"
+        accent="var(--section-accent)"
         actions={
           // The export route is a CSV-download Route Handler, so it must use <a> (a full GET),
           // not <Link>; the rule false-positives on this nested path.

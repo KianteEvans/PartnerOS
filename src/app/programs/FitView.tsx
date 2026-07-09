@@ -77,7 +77,7 @@ export function FitView({ view, programKey }: { view: ProgramFitView; programKey
         </Panel>
       )}
       {view.summary.bestNext && (
-        <Panel title="Readiness">
+        <Panel title="Readiness" accent="var(--section-accent)">
           <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
             <RingGauge
               value={view.summary.bestNext.coveragePercent}

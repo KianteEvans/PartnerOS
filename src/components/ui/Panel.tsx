@@ -22,6 +22,7 @@ export async function Panel({
   title,
   actions,
   accent,
+  icon,
   id,
   collapsible,
   collapseKey,
@@ -30,6 +31,8 @@ export async function Panel({
   title?: string;
   actions?: ReactNode;
   accent?: Tone | string;
+  /** Optional leading glyph rendered before the title, inheriting the accent colour. */
+  icon?: ReactNode;
   /** Anchor target (e.g. deep links like /ace/<id>#case-studies). */
   id?: string;
   /** Default true when a title is present. */
@@ -60,6 +63,7 @@ export async function Panel({
           initialCollapsed={state.collapsed}
           title={title as string}
           accentColor={accentColor}
+          icon={icon}
           actions={actions}
         >
           {children}
@@ -75,7 +79,14 @@ export async function Panel({
                 marginBottom: 16,
               }}
             >
-              {title ? <h2 style={{ margin: 0, fontSize: 16, color: accentColor }}>{title}</h2> : <span />}
+              {title ? (
+                <h2 style={{ margin: 0, fontSize: 16, color: accentColor, display: "flex", alignItems: "center", gap: 8 }}>
+                  {icon ? <span style={{ display: "inline-flex", flexShrink: 0 }}>{icon}</span> : null}
+                  {title}
+                </h2>
+              ) : (
+                <span />
+              )}
               {actions}
             </header>
           )}

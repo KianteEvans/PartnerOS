@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
 import { Table, type Column } from "@/components/ui/Table";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { MarketplaceNav } from "@/app/marketplace/MarketplaceNav";
 import { loadAgreementDetail, type AgreementChargeDetail } from "@/domain/marketplace/load";
 import { isActiveAgreement } from "@/domain/marketplace/billing";
@@ -68,7 +69,7 @@ export default async function AgreementDetailPage({
         <MetricCard label="Charges" value={String(a.charges.length)} sub="billing rows" />
       </MetricStrip>
 
-      <Panel title="Agreement">
+      <Panel title="Agreement" accent="var(--section-accent)">
         <dl
           style={{
             display: "grid",
@@ -130,7 +131,7 @@ export default async function AgreementDetailPage({
 
       <Panel title={`Charges (${a.charges.length})`} accent="var(--section-accent)">
         {a.charges.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>No charges recorded for this agreement.</p>
+          <EmptyState title="No charges recorded" hint="Charges appear here once AWS Marketplace bills this agreement." />
         ) : (
           <Table columns={chargeColumns} rows={a.charges} rowKey={(c) => c.id} empty="No charges." />
         )}

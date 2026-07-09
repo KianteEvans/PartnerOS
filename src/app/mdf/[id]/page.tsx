@@ -14,6 +14,8 @@ import { Callout } from "@/components/ui/Callout";
 import { BarChart } from "@/components/ui/BarChart";
 import { MetricCard } from "@/components/ui/MetricCard";
 import { MetricStrip } from "@/components/ui/MetricStrip";
+import { PreflightList } from "@/components/ui/PreflightList";
+import { IconMdf, IconWarning } from "@/components/ui/icons";
 import { MutationForm } from "@/components/ui/MutationForm";
 import { FormDrawer } from "@/components/ui/FormDrawer";
 import {
@@ -211,19 +213,13 @@ export default async function MdfDetailPage({
       </Panel>
 
       {status === "draft" && (
-        <Panel title="Eligibility preflight">
-          <div style={{ display: "grid", gap: 6 }}>
-            {elig.checks.map((c) => (
-              <div key={c.key} style={{ fontSize: 13 }}>
-                <span style={{ color: c.ok ? "var(--accent)" : "var(--danger)" }}>{c.ok ? "✓" : "✗"}</span> {c.label}
-              </div>
-            ))}
-          </div>
+        <Panel title="Eligibility preflight" accent={elig.eligible ? "ok" : "danger"} icon={<IconWarning size={16} />}>
+          <PreflightList checks={elig.checks.map((c) => ({ label: c.label, ok: c.ok, critical: true }))} />
         </Panel>
       )}
 
       {/* Proof + task handoffs */}
-      <Panel title="Proof & execution">
+      <Panel title="Proof & execution" accent="var(--section-accent)" icon={<IconMdf size={16} />}>
         <p style={{ fontSize: 13, margin: 0, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
           <span>
             Proof: {req.evidenceId ? <Link href="/programs/evidence" style={{ color: "var(--accent)" }}>linked ({data.evidenceStatus})</Link> : <span style={spanStyle}>none</span>}

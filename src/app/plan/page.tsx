@@ -140,7 +140,7 @@ export default async function AssessmentsPage({
         </MetricStrip>
       )}
 
-      <Panel title="Ask AWS — grounded in AWS docs">
+      <Panel title="Ask AWS — grounded in AWS docs" accent="var(--section-accent)">
         <AskAws enabled={Boolean(env.ANTHROPIC_API_KEY)} />
       </Panel>
 

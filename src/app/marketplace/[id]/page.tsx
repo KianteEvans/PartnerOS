@@ -412,7 +412,7 @@ export default async function ListingDetailPage({
 
       <Panel title="Change history" accent="var(--section-accent)">
         {listing.changeSets.length === 0 ? (
-          <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>No change sets yet.</p>
+          <EmptyState title="No change sets yet" hint="Publishing or editing a live listing records a Catalog change set here." />
         ) : (
           <Table columns={changeColumns} rows={listing.changeSets} rowKey={(c) => c.id} />
         )}

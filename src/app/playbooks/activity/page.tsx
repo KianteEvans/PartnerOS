@@ -8,6 +8,7 @@ import { Panel } from "@/components/ui/Panel";
 import { Card } from "@/components/ui/Card";
 import { Table, type Column } from "@/components/ui/Table";
 import { MutationForm } from "@/components/ui/MutationForm";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { PlaybooksNav } from "@/app/playbooks/PlaybooksNav";
 import { loadRuns, loadInbox, type PlaybookRunRow } from "@/domain/playbooks/load";
 import { approvePlaybookRun, dismissPlaybookRun, markNotificationRead } from "@/domain/playbooks/actions";
@@ -86,7 +87,7 @@ export default async function PlaybookActivityPage(): Promise<ReactNode> {
 
       <Panel title={`Notifications${inbox.unread > 0 ? ` · ${inbox.unread} unread` : ""}`} accent="var(--section-accent)">
         {inbox.items.length === 0 ? (
-          <p style={{ margin: 0, color: "var(--muted)", fontSize: 13 }}>No in-app notifications yet.</p>
+          <EmptyState title="No notifications yet" hint="Playbook notifications will appear here as rules fire." />
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {inbox.items.map((n) => (
