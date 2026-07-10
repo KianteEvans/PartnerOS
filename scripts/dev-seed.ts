@@ -8,6 +8,16 @@ import postgres from "postgres";
  *
  *   npx tsx scripts/dev-seed.ts        # after logging in once so a tenant exists
  */
+// Guard: this script CLEARS the tenant's domain tables before reseeding. It must
+// never run against anything but a local dev database.
+if ((process.env.PARTNEROS_LOCAL_DEV ?? "").toLowerCase() !== "true") {
+  console.error(
+    "[dev-seed] Refusing to run: PARTNEROS_LOCAL_DEV is not 'true'. " +
+      "This script wipes and reseeds domain data and is for local dev only.",
+  );
+  process.exit(1);
+}
+
 const CONN = process.env.DATABASE_URL ?? "postgres://postgres:password@localhost:54329/partneros";
 
 function isoOffset(days: number): string {
